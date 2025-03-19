@@ -5,6 +5,7 @@ from eth_account import Account
 import time
 
 from src.utils.retry import retry_with_backoff
+from src.utils.logger import log
 
 class Web3Service:
     """Service for interacting with Web3."""
@@ -38,7 +39,7 @@ class Web3Service:
         
         # Verify connection
         if not web3.is_connected():
-            logger.error(f"Failed to connect to {chain_name} RPC at {rpc_url}")
+            log().error(f"Failed to connect to {chain_name} RPC at {rpc_url}")
             raise ConnectionError(f"Failed to connect to {chain_name} RPC")
         
         # Cache connection
@@ -51,7 +52,7 @@ class Web3Service:
         """Get current gas price for the specified chain."""
         web3 = self.get_web3(chain_name)
         gas_price = web3.eth.gas_price
-        logger.debug(f"Current gas price on {chain_name}: {gas_price} wei")
+        log().debug(f"Current gas price on {chain_name}: {gas_price} wei")
         return gas_price
     
     @retry_with_backoff
@@ -75,13 +76,13 @@ class Web3Service:
             estimated_gas = web3.eth.estimate_gas(tx_for_estimation)
             # Add a small buffer to ensure transaction success (10%)
             gas_with_buffer = int(estimated_gas * 1.1)
-            logger.debug(f"Estimated gas on {chain_name}: {estimated_gas} (with buffer: {gas_with_buffer})")
+            log().debug(f"Estimated gas on {chain_name}: {estimated_gas} (with buffer: {gas_with_buffer})")
             return gas_with_buffer
         except Exception as e:
-            logger.error(f"Error estimating gas on {chain_name}: {str(e)}")
+            log().error(f"Error estimating gas on {chain_name}: {str(e)}")
             # Fallback to default gas limit
             default_gas = 150000  # Higher default than before
-            logger.warning(f"Using fallback gas limit: {default_gas}")
+            log().warning(f"Using fallback gas limit: {default_gas}")
             return default_gas
     
     @retry_with_backoff
@@ -89,7 +90,7 @@ class Web3Service:
         """Get current nonce for the account on the specified chain."""
         web3 = self.get_web3(chain_name)
         nonce = web3.eth.get_transaction_count(self.account.address)
-        logger.debug(f"Current nonce on {chain_name}: {nonce}")
+        log().debug(f"Current nonce on {chain_name}: {nonce}")
         return nonce
     
     @retry_with_backoff
@@ -98,7 +99,7 @@ class Web3Service:
         web3 = self.get_web3(chain_name)
         balance_wei = web3.eth.get_balance(self.account.address)
         balance_eth = web3.from_wei(balance_wei, 'ether')
-        logger.info(f"Balance on {chain_name}: {balance_eth} ETH")
+        log().info(f"Balance on {chain_name}: {balance_eth} ETH")
         return balance_wei
     
     @retry_with_backoff
@@ -123,7 +124,7 @@ class Web3Service:
             receipt = web3.eth.get_transaction_receipt(tx_hash)
             return receipt
         except Exception as e:
-            logger.error(f"Error getting transaction receipt on {chain_name}: {str(e)}")
+            log().error(f"Error getting transaction receipt on {chain_name}: {str(e)}")
             return None
     
     @retry_with_backoff
@@ -145,7 +146,7 @@ class Web3Service:
         required = transaction.get('value', 0) + (transaction.get('gas', 0) * transaction.get('gasPrice', 0))
         
         if balance < required:
-            logger.error(f"Insufficient balance on {chain_name}. Have: {web3.from_wei(balance, 'ether')} ETH, Need: {web3.from_wei(required, 'ether')} ETH")
+            log().error(f"Insufficient balance on {chain_name}. Have: {web3.from_wei(balance, 'ether')} ETH, Need: {web3.from_wei(required, 'ether')} ETH")
             return None
         
         # Create a more concise log message
@@ -156,7 +157,7 @@ class Web3Service:
         gas_limit = transaction.get('gas', 0)
         
         # Log a more concise transaction message
-        logger.info(
+        log().info(
             f"Tx: {chain_name} | To: {to_addr_short} | Value: {value_eth} ETH | Gas: {gas_price_gwei} Gwei | Limit: {gas_limit}"
         )
         
@@ -170,18 +171,18 @@ class Web3Service:
             # Convert to hex string
             tx_hash_hex = web3.to_hex(tx_hash)
             
-            logger.success(f"Transaction sent: {tx_hash_hex}")
+            log().success(f"Transaction sent: {tx_hash_hex}")
             
             # Wait for transaction to be mined
             try:
-                logger.info(f"Waiting for transaction {tx_hash_hex[:10]}... to be mined")
+                log().info(f"Waiting for transaction {tx_hash_hex[:10]}... to be mined")
                 receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=120, poll_latency=2)
                 
                 if receipt.status == 1:
-                    logger.success(f"Transaction {tx_hash_hex[:10]}... mined successfully in block {receipt.blockNumber}")
+                    log().success(f"Transaction {tx_hash_hex[:10]}... mined successfully in block {receipt.blockNumber}")
                     return tx_hash_hex
                 else:
-                    logger.error(f"Transaction {tx_hash_hex[:10]}... failed with status: {receipt.status}")
+                    log().error(f"Transaction {tx_hash_hex[:10]}... failed with status: {receipt.status}")
                     
                     # Try to get failure reason
                     try:
@@ -205,18 +206,18 @@ class Web3Service:
                         except Exception as call_err:
                             err_msg = str(call_err)
                         
-                        logger.error(f"Transaction failed reason: {err_msg}")
+                        log().error(f"Transaction failed reason: {err_msg}")
                     except Exception as err:
-                        logger.error(f"Could not determine failure reason: {str(err)}")
+                        log().error(f"Could not determine failure reason: {str(err)}")
                     
                     return None
             except Exception as wait_err:
-                logger.error(f"Error waiting for transaction: {str(wait_err)}")
+                log().error(f"Error waiting for transaction: {str(wait_err)}")
                 # Transaction may still have been sent, return hash for further checks
                 return tx_hash_hex
                 
         except Exception as e:
-            logger.error(f"Error sending transaction: {str(e)}")
+            log().error(f"Error sending transaction: {str(e)}")
             return None
         
     def verify_transaction(self, chain_name, tx_hash, timeout=120):
@@ -237,5 +238,5 @@ class Web3Service:
             receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=timeout)
             return receipt.status == 1
         except Exception as e:
-            logger.error(f"Error verifying transaction: {str(e)}")
+            log().error(f"Error verifying transaction: {str(e)}")
             return False

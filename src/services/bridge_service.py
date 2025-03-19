@@ -1,6 +1,7 @@
 import time
 import json
 import random
+import threading
 from web3 import Web3
 import requests
 from loguru import logger
@@ -11,7 +12,11 @@ import sys
 from src.services.web3_service import Web3Service
 from src.constants.constants import API_ENDPOINTS, TX_STATUS, STATUS_DESCRIPTIONS, SUCCESS_STATUSES, REFUND_STATUSES, FAILED_STATUSES
 from src.utils.retry import retry_with_backoff
+from src.utils.logger import log
 from hexbytes import HexBytes
+
+# Thread-safe lock for status updates
+status_lock = threading.RLock()
 
 class BridgeService:
     """Service for interacting with the t3rn bridge."""
@@ -43,7 +48,7 @@ class BridgeService:
             response.raise_for_status()
             return float(response.text)
         except requests.RequestException as e:
-            logger.error(f"Error getting price: {str(e)}")
+            log().error(f"Error getting price: {str(e)}")
             raise
     
     @retry_with_backoff
@@ -75,7 +80,7 @@ class BridgeService:
             "spreadOptionPercentage": 0
         }
         
-        logger.debug(f"Estimate payload: {payload}")
+        log().debug(f"Estimate payload: {payload}")
         
         try:
             response = requests.post(
@@ -86,10 +91,10 @@ class BridgeService:
             )
             response.raise_for_status()
             estimate_data = response.json()
-            logger.debug(f"Estimate response: {json.dumps(estimate_data, indent=2)}")
+            log().debug(f"Estimate response: {json.dumps(estimate_data, indent=2)}")
             return estimate_data
         except requests.RequestException as e:
-            logger.error(f"Error estimating bridge: {str(e)}")
+            log().error(f"Error estimating bridge: {str(e)}")
             raise
     
     def bridge(self, from_chain, to_chain, amount):
@@ -107,7 +112,7 @@ class BridgeService:
         # Make sure amount has limited decimal places (max 5)
         amount = round(amount, 5)
         
-        logger.info(f"Preparing to bridge {amount} ETH from {from_chain} to {to_chain}")
+        log().info(f"Preparing to bridge {amount} ETH from {from_chain} to {to_chain}")
         
         # Convert amount to Wei
         amount_wei = Web3.to_wei(amount, 'ether')
@@ -119,7 +124,7 @@ class BridgeService:
         
         # Get price in USD
         usd_price = self.get_price(from_chain_config["api_name"], "eth", amount_wei_str)
-        logger.info(f"Current ETH value: ${usd_price:.2f}")
+        log().info(f"Current ETH value: ${usd_price:.2f}")
         
         # Get bridge estimate
         estimate = self.estimate_bridge(from_chain, to_chain, amount_wei_str)
@@ -211,7 +216,7 @@ class BridgeService:
             "data": calldata
         }
         
-        logger.debug(f"Transaction data: {calldata}")
+        log().debug(f"Transaction data: {calldata}")
         
         # Send transaction
         tx_hash = self.web3_service.send_transaction(from_chain, tx)
@@ -222,7 +227,7 @@ class BridgeService:
             is_successful = self.web3_service.verify_transaction(from_chain, tx_hash)
             
             if not is_successful:
-                logger.error(f"Transaction failed: {tx_hash}")
+                log().error(f"Transaction failed: {tx_hash}")
                 return None
                 
             return tx_hash
@@ -247,7 +252,7 @@ class BridgeService:
             response.raise_for_status()
             return response.json()
         except requests.RequestException as e:
-            logger.error(f"Error getting order status: {str(e)}")
+            log().error(f"Error getting order status: {str(e)}")
             raise
     
     def extract_order_id_from_receipt(self, chain_name, tx_hash):
@@ -266,7 +271,7 @@ class BridgeService:
             receipt = self.web3_service.get_transaction_receipt(chain_name, tx_hash)
             
             if not receipt or not hasattr(receipt, 'logs') or not receipt.logs:
-                logger.error(f"No logs found in transaction receipt: {tx_hash[:10]}...")
+                log().error(f"No logs found in transaction receipt: {tx_hash[:10]}...")
                 return None
             
             # The order ID is in the first topic[1] of the first log with the specific event signature
@@ -279,30 +284,30 @@ class BridgeService:
             else:
                 target_event_signature_bytes = HexBytes(target_event_signature)
             
-            for log in receipt.logs:
-                if hasattr(log, 'topics') and len(log.topics) >= 2:
+            for log_entry in receipt.logs:
+                if hasattr(log_entry, 'topics') and len(log_entry.topics) >= 2:
                     # Convert log topic to string for comparison if needed
-                    topic_0 = log.topics[0]
+                    topic_0 = log_entry.topics[0]
                     
                     if topic_0 == target_event_signature_bytes:
                         # The second topic contains the order ID
-                        order_id = log.topics[1].hex()
-                        logger.info(f"Extracted order ID from logs: {order_id}")
+                        order_id = log_entry.topics[1].hex()
+                        log().info(f"Extracted order ID from logs: {order_id}")
                         return order_id
             
             # Try alternative event signature if first one fails
             # Some contracts use different event signatures
-            for log in receipt.logs:
-                if hasattr(log, 'topics') and len(log.topics) >= 2:
-                    order_id = log.topics[1].hex()
-                    logger.info(f"Extracted possible order ID from logs (alternative method): {order_id}")
+            for log_entry in receipt.logs:
+                if hasattr(log_entry, 'topics') and len(log_entry.topics) >= 2:
+                    order_id = log_entry.topics[1].hex()
+                    log().info(f"Extracted possible order ID from logs (alternative method): {order_id}")
                     return order_id
             
-            logger.error(f"Order ID not found in transaction logs for tx: {tx_hash[:10]}...")
+            log().error(f"Order ID not found in transaction logs for tx: {tx_hash[:10]}...")
             return None
         except Exception as e:
-            logger.error(f"Error extracting order ID from receipt: {str(e)}")
-            logger.error(traceback.format_exc())
+            log().error(f"Error extracting order ID from receipt: {str(e)}")
+            log().error(traceback.format_exc())
             return None
     
     def wait_for_completion(self, tx_hash, max_attempts=60, delay=5):
@@ -318,10 +323,10 @@ class BridgeService:
             bool: True if completed, False otherwise
         """
         if not tx_hash:
-            logger.error("No transaction hash provided - cannot wait for completion")
+            log().error("No transaction hash provided - cannot wait for completion")
             return False
             
-        logger.info(f"Waiting for bridge transaction {tx_hash[:10]}... to complete")
+        log().info(f"Waiting for bridge transaction {tx_hash[:10]}... to complete")
         
         # Extract order ID from transaction receipt
         # First determine which chain we're on based on tx_hash
@@ -336,23 +341,20 @@ class BridgeService:
                 continue
         
         if not from_chain:
-            logger.error(f"Could not determine source chain for tx: {tx_hash[:10]}...")
+            log().error(f"Could not determine source chain for tx: {tx_hash[:10]}...")
             # Fallback to base_sepolia as default
             from_chain = "base_sepolia"
         
         order_id = self.extract_order_id_from_receipt(from_chain, tx_hash)
         
         if not order_id:
-            logger.error(f"Could not extract order ID from transaction: {tx_hash[:10]}...")
+            log().error(f"Could not extract order ID from transaction: {tx_hash[:10]}...")
             return False
         
-        logger.info(f"Monitoring order ID: {order_id[:10]}... for completion")
+        log().info(f"Monitoring order ID: {order_id[:10]}... for completion")
         
         # Track the last status to avoid repeated updates
         last_status = None
-        
-        # Use a custom logger with specific format for status updates
-        status_logger = logger.bind(status_update=True)
         
         for attempt in range(max_attempts):
             try:
@@ -371,9 +373,9 @@ class BridgeService:
                     # Only update the status if it changed
                     if current_status != last_status:
                         status_desc = STATUS_DESCRIPTIONS.get(current_status, "Unknown status")
-                        print(f"\r{' ' * 150}", end="")  # Clear the line with many spaces
-                        print(f"\r", end="")  # Move cursor to the beginning of the line
-                        logger.info(f"Order status: {current_status} : {status_desc} ({attempt+1}/{max_attempts})")
+                        
+                        # Thread-safe logging without print statements that can interfere with other threads
+                        log().info(f"Order status: {current_status} : {status_desc} ({attempt+1}/{max_attempts})")
                         last_status = current_status
                 else:
                     current_status = order_status.get("status")
@@ -381,26 +383,26 @@ class BridgeService:
                     # Only update the status if it changed
                     if current_status != last_status:
                         status_desc = STATUS_DESCRIPTIONS.get(current_status, "Unknown status")
-                        print(f"\r{' ' * 150}", end="")  # Clear the line with many spaces
-                        print(f"\r", end="")  # Move cursor to the beginning of the line
-                        logger.info(f"Order status: {current_status} : {status_desc} ({attempt+1}/{max_attempts})")
+                        
+                        # Thread-safe logging without print statements that can interfere with other threads
+                        log().info(f"Order status: {current_status} : {status_desc} ({attempt+1}/{max_attempts})")
                         last_status = current_status
                     
                     # Check if we've reached a terminal status
                     if current_status in SUCCESS_STATUSES:
-                        logger.success(f"Bridge transaction completed successfully: {order_id[:10]}...")
+                        log().success(f"Bridge transaction completed successfully: {order_id[:10]}...")
                         return True
                     elif current_status in REFUND_STATUSES:
-                        logger.warning(f"Bridge transaction eligible for refund: {order_id[:10]}...")
+                        log().warning(f"Bridge transaction eligible for refund: {order_id[:10]}...")
                         # Continue monitoring to see if it transitions to a refund state
                     elif current_status in FAILED_STATUSES:
-                        logger.error(f"Bridge transaction failed: {order_id[:10]}...")
+                        log().error(f"Bridge transaction failed: {order_id[:10]}...")
                         return False
             except Exception as e:
-                logger.error(f"Error checking order status: {str(e)}")
+                log().error(f"Error checking order status: {str(e)}")
             
             # Sleep before the next attempt
             time.sleep(delay)
         
-        logger.warning(f"Max attempts reached. Transaction may still be in progress: {order_id[:10]}...")
+        log().warning(f"Max attempts reached. Transaction may still be in progress: {order_id[:10]}...")
         return False
