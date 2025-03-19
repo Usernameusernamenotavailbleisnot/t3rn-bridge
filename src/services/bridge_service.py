@@ -4,10 +4,12 @@ import random
 from web3 import Web3
 import requests
 from loguru import logger
+import traceback
 
 from src.services.web3_service import Web3Service
 from src.constants.constants import API_ENDPOINTS, TX_STATUS
 from src.utils.retry import retry_with_backoff
+from hexbytes import HexBytes
 
 class BridgeService:
     """Service for interacting with the t3rn bridge."""
@@ -100,6 +102,9 @@ class BridgeService:
         Returns:
             str or None: Transaction hash if successful, None if failed
         """
+        # Make sure amount has limited decimal places (max 5)
+        amount = round(amount, 5)
+        
         logger.info(f"Preparing to bridge {amount} ETH from {from_chain} to {to_chain}")
         
         # Convert amount to Wei
@@ -229,6 +234,61 @@ class BridgeService:
             logger.error(f"Error getting order status: {str(e)}")
             raise
     
+    def extract_order_id_from_receipt(self, chain_name, tx_hash):
+        """
+        Extract order ID from transaction receipt logs.
+        
+        Args:
+            chain_name (str): Chain name
+            tx_hash (str): Transaction hash
+            
+        Returns:
+            str or None: Order ID if found, None otherwise
+        """
+        try:
+            # Get transaction receipt
+            receipt = self.web3_service.get_transaction_receipt(chain_name, tx_hash)
+            
+            if not receipt or not hasattr(receipt, 'logs') or not receipt.logs:
+                logger.error(f"No logs found in transaction receipt: {tx_hash[:10]}...")
+                return None
+            
+            # The order ID is in the first topic[1] of the first log with the specific event signature
+            # The signature is 0x3bb399125b923176baf5098f432689e4843dee54b68daf1d7cadd91d99a63601
+            target_event_signature = "0x3bb399125b923176baf5098f432689e4843dee54b68daf1d7cadd91d99a63601"
+            
+            # Convert the signature to bytes if needed
+            if not isinstance(target_event_signature, bytes) and target_event_signature.startswith('0x'):
+                target_event_signature_bytes = HexBytes(target_event_signature)
+            else:
+                target_event_signature_bytes = HexBytes(target_event_signature)
+            
+            for log in receipt.logs:
+                if hasattr(log, 'topics') and len(log.topics) >= 2:
+                    # Convert log topic to string for comparison if needed
+                    topic_0 = log.topics[0]
+                    
+                    if topic_0 == target_event_signature_bytes:
+                        # The second topic contains the order ID
+                        order_id = log.topics[1].hex()
+                        logger.info(f"Extracted order ID from logs: {order_id}")
+                        return order_id
+            
+            # Try alternative event signature if first one fails
+            # Some contracts use different event signatures
+            for log in receipt.logs:
+                if hasattr(log, 'topics') and len(log.topics) >= 2:
+                    order_id = log.topics[1].hex()
+                    logger.info(f"Extracted possible order ID from logs (alternative method): {order_id}")
+                    return order_id
+            
+            logger.error(f"Order ID not found in transaction logs for tx: {tx_hash[:10]}...")
+            return None
+        except Exception as e:
+            logger.error(f"Error extracting order ID from receipt: {str(e)}")
+            logger.error(traceback.format_exc())
+            return None
+    
     def wait_for_completion(self, tx_hash, max_attempts=60, delay=5):
         """
         Wait for bridge transaction to complete.
@@ -247,9 +307,41 @@ class BridgeService:
             
         logger.info(f"Waiting for bridge transaction {tx_hash[:10]}... to complete")
         
+        # Extract order ID from transaction receipt
+        # First determine which chain we're on based on tx_hash
+        from_chain = None
+        for chain_name in self.config["chains"]:
+            try:
+                receipt = self.web3_service.get_transaction_receipt(chain_name, tx_hash)
+                if receipt and receipt.status == 1:
+                    from_chain = chain_name
+                    break
+            except:
+                continue
+        
+        if not from_chain:
+            logger.error(f"Could not determine source chain for tx: {tx_hash[:10]}...")
+            # Fallback to base_sepolia as default
+            from_chain = "base_sepolia"
+        
+        order_id = self.extract_order_id_from_receipt(from_chain, tx_hash)
+        
+        if not order_id:
+            logger.error(f"Could not extract order ID from transaction: {tx_hash[:10]}...")
+            return False
+        
+        logger.info(f"Monitoring order ID: {order_id[:10]}... for completion")
+        
         for attempt in range(max_attempts):
             try:
-                order_status = self.get_order_status(tx_hash)
+                # Ensure order_id is a string without '0x' prefix if needed by API
+                order_id_str = order_id
+                if isinstance(order_id, HexBytes):
+                    order_id_str = order_id.hex()
+                elif isinstance(order_id, str) and not order_id.startswith('0x'):
+                    order_id_str = '0x' + order_id
+                
+                order_status = self.get_order_status(order_id_str)
                 
                 if not order_status:
                     logger.info(f"Order not found yet. Waiting... ({attempt+1}/{max_attempts})")
@@ -259,10 +351,10 @@ class BridgeService:
                 status = order_status.get("status")
                 
                 if status == TX_STATUS["EXECUTED"]:
-                    logger.success(f"Bridge transaction completed: {tx_hash[:10]}...")
+                    logger.success(f"Bridge transaction completed: {order_id[:10]}...")
                     return True
                 elif status == TX_STATUS["FAILED"]:
-                    logger.error(f"Bridge transaction failed: {tx_hash[:10]}...")
+                    logger.error(f"Bridge transaction failed: {order_id[:10]}...")
                     return False
                 else:
                     logger.info(f"Bridge status: {status}. Waiting... ({attempt+1}/{max_attempts})")
@@ -271,5 +363,5 @@ class BridgeService:
             
             time.sleep(delay)
         
-        logger.warning(f"Max attempts reached. Transaction may still be in progress: {tx_hash[:10]}...")
+        logger.warning(f"Max attempts reached. Transaction may still be in progress: {order_id[:10]}...")
         return False

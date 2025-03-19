@@ -10,11 +10,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.config.config_manager import ConfigManager
 from src.services.bridge_service import BridgeService
 from src.utils.logger import setup_logger, get_masked_address
-from src.utils.retry import retry_with_animation
+from src.utils.retry import retry_with_backoff
 from src.utils.proxy import ProxyManager
 from src.utils.animations import (
     display_banner,
-    display_countdown,
     display_processing_animation
 )
 
@@ -70,21 +69,24 @@ def main():
                 logger.info(f"Processing wallet {masked_address} ({i+1}/{len(private_keys)})")
                 
                 for j in range(config_data["bridge"]["repeat_count"]):
-                    # Random amount within configured range
-                    amount = random.uniform(
-                        config_data["bridge"]["amount"]["min"],
-                        config_data["bridge"]["amount"]["max"]
-                    )
+                    # Random amount within configured range, but with limited decimal places (5 max)
+                    min_amount = config_data["bridge"]["amount"]["min"]
+                    max_amount = config_data["bridge"]["amount"]["max"]
+                    
+                    # Generate a random amount with at most 5 decimal places
+                    amount = round(random.uniform(min_amount, max_amount), 5)
                     
                     logger.info(f"Bridge attempt {j+1}/{config_data['bridge']['repeat_count']}")
                     
+                    # Log transaction info
+                    logger.info(f"Bridging {amount} ETH from Base Sepolia to Optimism Sepolia")
+                    
                     # Perform Base Sepolia to Optimism Sepolia bridge
-                    with display_processing_animation("Bridging from Base to Optimism"):
-                        tx_hash_base_to_op = bridge_service.bridge(
-                            from_chain="base_sepolia",
-                            to_chain="optimism_sepolia",
-                            amount=amount
-                        )
+                    tx_hash_base_to_op = bridge_service.bridge(
+                        from_chain="base_sepolia",
+                        to_chain="optimism_sepolia",
+                        amount=amount
+                    )
                     
                     if tx_hash_base_to_op:
                         logger.success(f"Base to Optimism bridge successful: {tx_hash_base_to_op[:10]}...")
@@ -95,12 +97,12 @@ def main():
                         
                         if bridge_completed:
                             # Perform Optimism Sepolia to Base Sepolia bridge
-                            with display_processing_animation("Bridging from Optimism to Base"):
-                                tx_hash_op_to_base = bridge_service.bridge(
-                                    from_chain="optimism_sepolia",
-                                    to_chain="base_sepolia",
-                                    amount=amount
-                                )
+                            logger.info(f"Bridging {amount} ETH from Optimism Sepolia to Base Sepolia")
+                            tx_hash_op_to_base = bridge_service.bridge(
+                                from_chain="optimism_sepolia",
+                                to_chain="base_sepolia",
+                                amount=amount
+                            )
                                 
                             if tx_hash_op_to_base:
                                 logger.success(f"Optimism to Base bridge successful: {tx_hash_op_to_base[:10]}...")
@@ -128,10 +130,18 @@ def main():
                 logger.info(f"Waiting {delay_time} seconds before next wallet")
                 time.sleep(delay_time)
         
-        # Display countdown for 25-hour delay before restarting
+        # Delay before restarting
         delay_hours = config_data['delay']['after_completion'] // 3600
         logger.info(f"All wallets processed. Waiting {delay_hours} hours before restarting")
-        display_countdown(config_data["delay"]["after_completion"])
+        
+        # Simple countdown
+        total_seconds = config_data["delay"]["after_completion"]
+        for remaining in range(total_seconds, 0, -30):
+            hours = remaining // 3600
+            minutes = (remaining % 3600) // 60
+            seconds = remaining % 60
+            logger.info(f"Next run in: {hours:02d}:{minutes:02d}:{seconds:02d}")
+            time.sleep(min(30, remaining))
 
 if __name__ == "__main__":
     main()

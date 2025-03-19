@@ -72,6 +72,31 @@ class Web3Service:
         return balance_wei
     
     @retry_with_backoff
+    def get_transaction_receipt(self, chain_name, tx_hash):
+        """
+        Get transaction receipt for a transaction hash.
+        
+        Args:
+            chain_name (str): Chain name
+            tx_hash (str): Transaction hash
+            
+        Returns:
+            dict or None: Transaction receipt if successful, None otherwise
+        """
+        web3 = self.get_web3(chain_name)
+        
+        try:
+            # Ensure tx_hash is properly formatted
+            if isinstance(tx_hash, str) and not tx_hash.startswith('0x'):
+                tx_hash = '0x' + tx_hash
+                
+            receipt = web3.eth.get_transaction_receipt(tx_hash)
+            return receipt
+        except Exception as e:
+            logger.error(f"Error getting transaction receipt on {chain_name}: {str(e)}")
+            return None
+    
+    @retry_with_backoff
     def send_transaction(self, chain_name, transaction):
         """
         Sign and send a transaction.

@@ -8,7 +8,7 @@ def setup_logger():
     log_format = (
         "<green>{time:DD/MM/YYYY - HH:mm:ss}</green> | "
         "<level>{level: <8}</level> | "
-        "<cyan>{module}</cyan> | "
+        "<cyan>{module: <15}</cyan> | "
         "<level>{message}</level>"
     )
     
