@@ -9,7 +9,7 @@
       "repeat_count": 2,
       "amount": {
         "min": 0.2,
-        "max": 0.3
+        "max": 0.2
       },
       "gas_multiplier": 1.1
     },
