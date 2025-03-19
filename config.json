@@ -1,5 +1,6 @@
 {
     "use_proxy": false,
+    "thread_count": 2,
     "retries": {
       "max_attempts": 3,
       "backoff_factor": 2,
@@ -8,8 +9,8 @@
     "bridge": {
       "repeat_count": 2,
       "amount": {
-        "min": 0.2,
-        "max": 0.2
+        "min": 0.11,
+        "max": 0.15
       },
       "gas_multiplier": 1.1
     },
