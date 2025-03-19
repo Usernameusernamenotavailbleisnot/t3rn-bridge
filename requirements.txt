@@ -1,0 +1,26 @@
+# Core dependencies
+web3==6.11.1
+eth-account==0.9.0
+requests==2.31.0
+
+# Rich UI and logging
+rich==13.7.0
+loguru==0.7.2
+
+# Utilities
+python-dotenv==1.0.0
+pydantic==2.5.2
+
+# HTTP Proxies support
+PySocks==1.7.1
+
+# For async operations (if needed)
+aiohttp==3.9.1
+asyncio==3.4.3
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+
+# Typing
+typing-extensions==4.8.0

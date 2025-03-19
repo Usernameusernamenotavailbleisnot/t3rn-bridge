@@ -1,0 +1,38 @@
+{
+    "use_proxy": false,
+    "retries": {
+      "max_attempts": 3,
+      "backoff_factor": 2,
+      "initial_wait": 1
+    },
+    "bridge": {
+      "repeat_count": 2,
+      "amount": {
+        "min": 0.2,
+        "max": 0.3
+      },
+      "gas_multiplier": 1.1
+    },
+    "delay": {
+      "between_wallets": 60,
+      "after_completion": 90000
+    },
+    "chains": {
+      "base_sepolia": {
+        "chain_id": 84532,
+        "rpc_url": "https://sepolia.base.org",
+        "bridge_contract": "0xCEE0372632a37Ba4d0499D1E2116eCff3A17d3C3",
+        "api_name": "bast"
+      },
+      "optimism_sepolia": {
+        "chain_id": 11155420,
+        "rpc_url": "https://sepolia.optimism.io",
+        "bridge_contract": "0xb6Def636914Ae60173d9007E732684a9eEDEF26E",
+        "api_name": "opst"
+      }
+    },
+    "api": {
+      "base_url": "https://api.t2rn.io",
+      "timeout": 30
+    }
+  }
