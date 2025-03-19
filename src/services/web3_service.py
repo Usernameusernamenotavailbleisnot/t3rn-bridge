@@ -1,5 +1,9 @@
 from web3 import Web3
 from web3.middleware import geth_poa_middleware
+from web3.providers.rpc import HTTPProvider
+import requests
+from requests.auth import HTTPBasicAuth
+from urllib.parse import urlparse
 from loguru import logger
 from eth_account import Account
 import time
@@ -10,6 +14,46 @@ from src.utils.thread_safe import Web3ConnectionManager
 from src.utils.retry import retry_with_backoff
 from src.utils.logger import log
 
+class ProxiedHTTPProvider(HTTPProvider):
+    """Custom HTTP Provider with proxy support."""
+    
+    def __init__(self, endpoint_uri, proxy_url=None, request_kwargs=None, **kwargs):
+        self.proxy_url = proxy_url
+        # Make sure request_kwargs exists and has a timeout
+        if request_kwargs is None:
+            request_kwargs = {}
+        if 'timeout' not in request_kwargs:
+            request_kwargs['timeout'] = 30  # Default timeout
+        
+        # Initialize parent class with our request_kwargs
+        super().__init__(endpoint_uri, request_kwargs=request_kwargs, **kwargs)
+    
+    def make_request(self, method, params):
+        self.logger.debug("Making request HTTP. URI: %s, Method: %s",
+                     self.endpoint_uri, method)
+        
+        request_data = self.encode_rpc_request(method, params)
+        
+        session = requests.Session()
+        if self.proxy_url:
+            session.proxies = {
+                "http": self.proxy_url,
+                "https": self.proxy_url
+            }
+        
+        # Access _request_kwargs (with underscore) and get timeout
+        timeout = self._request_kwargs.get('timeout', 30)
+        
+        raw_response = session.post(
+            self.endpoint_uri,
+            data=request_data,
+            headers=self.get_request_headers(),
+            timeout=timeout
+        )
+        
+        response = self.decode_rpc_response(raw_response.content)
+        return response
+
 class Web3Service:
     """Service for interacting with Web3."""
     
@@ -17,7 +61,14 @@ class Web3Service:
         """Initialize Web3 service."""
         self.private_key = private_key
         self.config = config
-        self.proxy = proxy
+        
+        # Store both proxy dict and proxy URL
+        if isinstance(proxy, tuple) and len(proxy) == 2:
+            self.proxy_dict, self.proxy_url = proxy
+        else:
+            self.proxy_dict = proxy
+            self.proxy_url = None if proxy is None else proxy.get("http") if isinstance(proxy, dict) else None
+            
         self.account = Account.from_key(private_key)
     
     def get_account_address(self):
@@ -39,8 +90,18 @@ class Web3Service:
         
         rpc_url = chain_config["rpc_url"]
         
-        # Initialize Web3
-        web3 = Web3(Web3.HTTPProvider(rpc_url))
+        # Initialize Web3 with proxy if available
+        if self.proxy_url:
+            log().debug(f"Creating Web3 connection for {chain_name} using proxy")
+            provider = ProxiedHTTPProvider(
+                rpc_url, 
+                proxy_url=self.proxy_url,
+                request_kwargs={'timeout': 30}
+            )
+            web3 = Web3(provider)
+        else:
+            web3 = Web3(Web3.HTTPProvider(rpc_url))
+            
         web3.middleware_onion.inject(geth_poa_middleware, layer=0)
         
         # Verify connection

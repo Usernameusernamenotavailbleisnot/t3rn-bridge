@@ -276,11 +276,14 @@ def main():
             
             # Fill the wallet queue
             for i, private_key in enumerate(private_keys):
+                # Get proxy for this wallet, both as dict and url
+                proxy_pair = proxy_manager.get_proxy(i) if config_data["use_proxy"] else (None, None)
+                
                 wallet_queue.put({
                     "private_key": private_key,
                     "index": i,
                     "total_wallets": len(private_keys),
-                    "proxy": proxy_manager.get_proxy(i) if config_data["use_proxy"] else None,
+                    "proxy": proxy_pair,
                     "config": config_data
                 })
             

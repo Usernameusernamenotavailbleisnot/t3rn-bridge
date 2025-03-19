@@ -26,7 +26,14 @@ class BridgeService:
         """Initialize bridge service."""
         self.private_key = private_key
         self.config = config
-        self.proxy = proxy
+        
+        # Store proxy with proper handling for tuple format
+        if isinstance(proxy, tuple) and len(proxy) == 2:
+            self.proxy_dict, self.proxy_url = proxy
+        else:
+            self.proxy_dict = proxy
+            self.proxy_url = None if proxy is None else proxy.get("http") if isinstance(proxy, dict) else None
+            
         self.web3_service = Web3Service(private_key, config, proxy)
         self.api_base_url = config["api"]["base_url"]
         self.wallet_address = self.web3_service.get_account_address()
@@ -41,13 +48,12 @@ class BridgeService:
         url = f"{self.api_base_url}{API_ENDPOINTS['price'].format(chain=chain, token=token, amount=amount_wei)}"
         
         try:
-            # Get the thread-specific session
-            session = SessionManager.get_session()
+            # Get the thread-specific session with proxy
+            session = SessionManager.get_session(self.proxy_dict)
             
             response = session.get(
                 url, 
-                timeout=self.config["api"]["timeout"],
-                proxies=self.proxy
+                timeout=self.config["api"]["timeout"]
             )
             response.raise_for_status()
             return float(response.text)
@@ -87,14 +93,13 @@ class BridgeService:
         log().debug(f"Estimate payload: {payload}")
         
         try:
-            # Get the thread-specific session
-            session = SessionManager.get_session()
+            # Get the thread-specific session with proxy
+            session = SessionManager.get_session(self.proxy_dict)
             
             response = session.post(
                 url, 
                 json=payload,
-                timeout=self.config["api"]["timeout"],
-                proxies=self.proxy
+                timeout=self.config["api"]["timeout"]
             )
             response.raise_for_status()
             estimate_data = response.json()
@@ -159,7 +164,7 @@ class BridgeService:
         else:
             # Fallback to original amount
             amount_hex = hex(amount_wei)[2:]  # Remove '0x'
-                
+            
         amount_padded = '0' * (64 - len(amount_hex)) + amount_hex
         
         # Zero padding (as per HAR file)
@@ -171,7 +176,7 @@ class BridgeService:
         else:
             # Use the actual bridge amount as max reward instead of hardcoded value
             max_reward_hex = hex(amount_wei)[2:]  # Convert to hex and remove '0x'
-                
+            
         max_reward_padded = '0' * (64 - len(max_reward_hex)) + max_reward_hex
         
         # Build the complete calldata (based on HAR file)
@@ -191,7 +196,7 @@ class BridgeService:
             gas_price = int(estimate.get("gasPrice", 0))
         else:
             gas_price = self.web3_service.get_gas_price(from_chain)
-                
+            
         gas_price_with_multiplier = int(gas_price * self.config["bridge"]["gas_multiplier"])
         
         # Get nonce
@@ -236,7 +241,7 @@ class BridgeService:
             if not is_successful:
                 log().error(f"Transaction failed: {tx_hash}")
                 return None
-                    
+                
             return tx_hash
         
         return None
@@ -247,13 +252,12 @@ class BridgeService:
         url = f"{self.api_base_url}{API_ENDPOINTS['order'].format(order_id=order_id)}"
         
         try:
-            # Get the thread-specific session
-            session = SessionManager.get_session()
+            # Get the thread-specific session with proxy
+            session = SessionManager.get_session(self.proxy_dict)
             
             response = session.get(
                 url, 
-                timeout=self.config["api"]["timeout"],
-                proxies=self.proxy
+                timeout=self.config["api"]["timeout"]
             )
             
             if response.status_code == 404:

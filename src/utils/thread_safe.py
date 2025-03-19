@@ -1,5 +1,5 @@
 """
-Utilities for thread-safe operations.
+Utilities for thread-safe operations with proxy support.
 """
 import threading
 import requests
@@ -9,17 +9,21 @@ from loguru import logger
 _thread_local = threading.local()
 
 class SessionManager:
-    """Manages thread-specific HTTP sessions."""
+    """Manages thread-specific HTTP sessions with proxy support."""
     
     @staticmethod
-    def get_session():
+    def get_session(proxy=None):
         """
-        Get a thread-specific requests session.
+        Get a thread-specific requests session with optional proxy.
         Creates a new session if one doesn't exist.
         
+        Args:
+            proxy (dict, optional): Proxy configuration to use for this session
+            
         Returns:
             requests.Session: A session specific to the current thread
         """
+        # Create session attribute if it doesn't exist
         if not hasattr(_thread_local, 'http_session'):
             logger.debug(f"Creating new HTTP session for thread {threading.get_ident()}")
             _thread_local.http_session = requests.Session()
@@ -31,6 +35,10 @@ class SessionManager:
                 "origin": "https://unlock3d.t3rn.io",
                 "referer": "https://unlock3d.t3rn.io/"
             })
+        
+        # If proxy is provided, update the session's proxies
+        if proxy:
+            _thread_local.http_session.proxies = proxy
         
         return _thread_local.http_session
 
