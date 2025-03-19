@@ -25,6 +25,7 @@ This application automates the process of bridging ETH tokens between Base Sepol
 ## Prerequisites
 
 - Python 3.8+
+- Virtual environment (venv)
 - Ethereum wallet(s) with testnet ETH on Base Sepolia
 - Internet connection
 
@@ -36,12 +37,24 @@ This application automates the process of bridging ETH tokens between Base Sepol
    cd t3rn-bridge
    ```
 
-2. Install dependencies:
+2. Create and activate a virtual environment (mandatory):
+   ```
+   # Create virtual environment
+   python -m venv venv
+   
+   # Activate virtual environment
+   # On Windows:
+   venv\Scripts\activate
+   # On macOS/Linux:
+   source venv/bin/activate
+   ```
+
+3. Install dependencies:
    ```
    pip install -r requirements.txt
    ```
 
-3. Set up your configuration files:
+4. Set up your configuration files:
    - `config.json`: Bridge configuration parameters
    - `pk.txt`: List of private keys (one per line)
    - `proxy.txt` (optional): List of proxies (one per line)
@@ -124,9 +137,13 @@ user:pass@192.168.1.2:8080
 
 ## Usage
 
-Run the main application:
+Make sure your virtual environment is activated, then run the main application:
 
 ```
+# Ensure venv is activated
+# On Windows: venv\Scripts\activate
+# On macOS/Linux: source venv/bin/activate
+
 python -m src.app
 ```
 
