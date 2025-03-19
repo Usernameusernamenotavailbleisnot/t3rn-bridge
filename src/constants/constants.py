@@ -17,6 +17,7 @@ TX_STATUS = {
     "EXECUTED": "Executed",
     "ATTESTED": "Attested",
     "CLAIMED": "Claimed",
+    "CLAIMED_INSURANCE": "ClaimedInsurance",  # Added new status
     "EXPIRED": "Expired",
     "PENDING_REFUND": "Pending Refund",
     "ATTESTED_REFUND": "Attested Refund",
@@ -32,6 +33,7 @@ STATUS_COLORS = {
     "Executed": "purple",
     "Attested": "light_blue",
     "Claimed": "green",
+    "ClaimedInsurance": "green",  # Added new status
     "Expired": "light_gray",
     "Pending Refund": "light_pink",
     "Attested Refund": "light_blue",
@@ -47,6 +49,7 @@ STATUS_DESCRIPTIONS = {
     "Executed": "The order has been executed.",
     "Attested": "The order has been attested.",
     "Claimed": "The reward for carrying out this order has been claimed by an executor.",
+    "ClaimedInsurance": "The insurance for this order has been claimed and the transaction is complete.",  # Added new status
     "Expired": "The order exceeded 30 min and moved to expired. It will be checked if it was executed or qualifies for a refund.",
     "Pending Refund": "The order was not fulfilled in a timely manner. The account that placed the order has not yet requested a refund.",
     "Attested Refund": "The refund has been attested.",
@@ -55,7 +58,7 @@ STATUS_DESCRIPTIONS = {
 }
 
 # Success Statuses (transaction considered complete)
-SUCCESS_STATUSES = ["Executed", "Attested", "Claimed"]
+SUCCESS_STATUSES = ["Executed", "Attested", "Claimed", "ClaimedInsurance"]  # Added ClaimedInsurance to success statuses
 
 # Refund Statuses (transaction eligible for refund)
 REFUND_STATUSES = ["Expired", "Pending Refund", "Attested Refund", "Claimed Refund"]

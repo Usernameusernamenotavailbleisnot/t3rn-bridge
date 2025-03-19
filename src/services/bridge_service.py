@@ -13,6 +13,7 @@ from src.services.web3_service import Web3Service
 from src.constants.constants import API_ENDPOINTS, TX_STATUS, STATUS_DESCRIPTIONS, SUCCESS_STATUSES, REFUND_STATUSES, FAILED_STATUSES
 from src.utils.retry import retry_with_backoff
 from src.utils.logger import log
+from src.utils.thread_safe import SessionManager
 from hexbytes import HexBytes
 
 # Thread-safe lock for status updates
@@ -40,7 +41,10 @@ class BridgeService:
         url = f"{self.api_base_url}{API_ENDPOINTS['price'].format(chain=chain, token=token, amount=amount_wei)}"
         
         try:
-            response = requests.get(
+            # Get the thread-specific session
+            session = SessionManager.get_session()
+            
+            response = session.get(
                 url, 
                 timeout=self.config["api"]["timeout"],
                 proxies=self.proxy
@@ -83,7 +87,10 @@ class BridgeService:
         log().debug(f"Estimate payload: {payload}")
         
         try:
-            response = requests.post(
+            # Get the thread-specific session
+            session = SessionManager.get_session()
+            
+            response = session.post(
                 url, 
                 json=payload,
                 timeout=self.config["api"]["timeout"],
@@ -152,7 +159,7 @@ class BridgeService:
         else:
             # Fallback to original amount
             amount_hex = hex(amount_wei)[2:]  # Remove '0x'
-            
+                
         amount_padded = '0' * (64 - len(amount_hex)) + amount_hex
         
         # Zero padding (as per HAR file)
@@ -164,7 +171,7 @@ class BridgeService:
         else:
             # Use the actual bridge amount as max reward instead of hardcoded value
             max_reward_hex = hex(amount_wei)[2:]  # Convert to hex and remove '0x'
-            
+                
         max_reward_padded = '0' * (64 - len(max_reward_hex)) + max_reward_hex
         
         # Build the complete calldata (based on HAR file)
@@ -184,7 +191,7 @@ class BridgeService:
             gas_price = int(estimate.get("gasPrice", 0))
         else:
             gas_price = self.web3_service.get_gas_price(from_chain)
-            
+                
         gas_price_with_multiplier = int(gas_price * self.config["bridge"]["gas_multiplier"])
         
         # Get nonce
@@ -229,7 +236,7 @@ class BridgeService:
             if not is_successful:
                 log().error(f"Transaction failed: {tx_hash}")
                 return None
-                
+                    
             return tx_hash
         
         return None
@@ -240,7 +247,10 @@ class BridgeService:
         url = f"{self.api_base_url}{API_ENDPOINTS['order'].format(order_id=order_id)}"
         
         try:
-            response = requests.get(
+            # Get the thread-specific session
+            session = SessionManager.get_session()
+            
+            response = session.get(
                 url, 
                 timeout=self.config["api"]["timeout"],
                 proxies=self.proxy
@@ -310,14 +320,16 @@ class BridgeService:
             log().error(traceback.format_exc())
             return None
     
-    def wait_for_completion(self, tx_hash, max_attempts=60, delay=5):
+    def wait_for_completion(self, tx_hash, max_attempts=60, delay=5, timeout_minutes=15, source_chain=None):
         """
-        Wait for bridge transaction to complete.
+        Wait for bridge transaction to complete with improved error handling and timeouts.
         
         Args:
             tx_hash (str): Transaction hash
-            max_attempts (int): Maximum number of attempts
+            max_attempts (int): Maximum number of attempts for status checks
             delay (int): Delay between attempts in seconds
+            timeout_minutes (int): Overall timeout in minutes to prevent indefinite waiting
+            source_chain (str, optional): Source chain where the transaction was initiated
             
         Returns:
             bool: True if completed, False otherwise
@@ -328,37 +340,104 @@ class BridgeService:
             
         log().info(f"Waiting for bridge transaction {tx_hash[:10]}... to complete")
         
-        # Extract order ID from transaction receipt
-        # First determine which chain we're on based on tx_hash
-        from_chain = None
-        for chain_name in self.config["chains"]:
-            try:
-                receipt = self.web3_service.get_transaction_receipt(chain_name, tx_hash)
-                if receipt and receipt.status == 1:
-                    from_chain = chain_name
-                    break
-            except:
-                continue
+        # Calculate overall timeout
+        timeout_seconds = timeout_minutes * 60
+        start_time = time.time()
         
+        # Determine the source chain
+        from_chain = source_chain
         if not from_chain:
-            log().error(f"Could not determine source chain for tx: {tx_hash[:10]}...")
-            # Fallback to base_sepolia as default
-            from_chain = "base_sepolia"
+            # Try to determine which chain the transaction is on
+            for chain_name in self.config["chains"]:
+                try:
+                    receipt = self.web3_service.get_transaction_receipt(chain_name, tx_hash)
+                    if receipt and receipt.status == 1:
+                        from_chain = chain_name
+                        log().info(f"Determined transaction source chain: {from_chain}")
+                        break
+                except Exception as e:
+                    log().debug(f"Error checking receipt on {chain_name}: {str(e)}")
+                    continue
         
-        order_id = self.extract_order_id_from_receipt(from_chain, tx_hash)
+            if not from_chain:
+                log().error(f"Could not determine source chain for tx: {tx_hash[:10]}...")
+                # Try to find the most recently used chain
+                from_chain = "base_sepolia"  # Default fallback
+                log().warning(f"Using fallback source chain: {from_chain}")
+        else:
+            log().info(f"Using provided source chain: {from_chain}")
+        
+        # Determine destination chain based on the source chain
+        to_chain = "optimism_sepolia" if from_chain == "base_sepolia" else "base_sepolia"
+        
+        # Add a timeout for extracting order ID to prevent getting stuck
+        extract_attempts = 3
+        order_id = None
+        
+        for attempt in range(extract_attempts):
+            try:
+                order_id = self.extract_order_id_from_receipt(from_chain, tx_hash)
+                if order_id:
+                    break
+                time.sleep(2)  # Short delay between attempts
+            except Exception as e:
+                log().error(f"Error extracting order ID (attempt {attempt+1}/{extract_attempts}): {str(e)}")
+                time.sleep(2)
         
         if not order_id:
-            log().error(f"Could not extract order ID from transaction: {tx_hash[:10]}...")
+            log().error(f"Failed to extract order ID after {extract_attempts} attempts: {tx_hash[:10]}...")
             return False
         
         log().info(f"Monitoring order ID: {order_id[:10]}... for completion")
         
         # Track the last status to avoid repeated updates
         last_status = None
+        consecutive_errors = 0
+        max_consecutive_errors = 5
+        
+        # Track time spent in unknown status
+        unknown_status_start = None
+        unknown_status_timeout = 120  # 2 minutes in unknown status before considering successful
+        
+        # Function to check for transaction confirmation on the destination chain
+        def check_destination_confirmation():
+            try:
+                # Format the order ID properly for API call if needed
+                order_id_str = order_id
+                if isinstance(order_id, HexBytes):
+                    order_id_str = order_id.hex()
+                elif isinstance(order_id, str) and not order_id.startswith('0x'):
+                    order_id_str = '0x' + order_id
+                    
+                # Get order status to check confirmation TX hash
+                order_status = self.get_order_status(order_id_str)
+                if order_status and "confirmationTxHash" in order_status:
+                    conf_tx_hash = order_status["confirmationTxHash"]
+                    if conf_tx_hash:
+                        # Check if transaction exists on destination chain
+                        receipt = self.web3_service.get_transaction_receipt(to_chain, conf_tx_hash)
+                        if receipt and receipt.status == 1:
+                            log().success(f"Confirmed transaction on destination chain: {conf_tx_hash[:10]}...")
+                            return True
+                return False
+            except Exception as e:
+                log().error(f"Error checking destination chain confirmation: {str(e)}")
+                return False
         
         for attempt in range(max_attempts):
+            # Check overall timeout
+            if time.time() - start_time > timeout_seconds:
+                log().error(f"Overall timeout of {timeout_minutes} minutes reached for order: {order_id[:10]}...")
+                return False
+                
             try:
-                # Ensure order_id is a string without '0x' prefix if needed by API
+                # First, check if we can confirm the transaction on the destination chain directly
+                if attempt % 4 == 0 and attempt > 8:  # Check every 4th attempt after the 8th attempt
+                    if check_destination_confirmation():
+                        log().success(f"Transaction confirmed directly on destination chain for order: {order_id[:10]}...")
+                        return True
+                        
+                # Ensure order_id is a string with correct format for API
                 order_id_str = order_id
                 if isinstance(order_id, HexBytes):
                     order_id_str = order_id.hex()
@@ -367,14 +446,15 @@ class BridgeService:
                 
                 order_status = self.get_order_status(order_id_str)
                 
+                # Reset consecutive error counter on successful API call
+                consecutive_errors = 0
+                
                 if not order_status:
                     current_status = "Placed"  # Assume it's placed but not yet registered in API
                     
                     # Only update the status if it changed
                     if current_status != last_status:
                         status_desc = STATUS_DESCRIPTIONS.get(current_status, "Unknown status")
-                        
-                        # Thread-safe logging without print statements that can interfere with other threads
                         log().info(f"Order status: {current_status} : {status_desc} ({attempt+1}/{max_attempts})")
                         last_status = current_status
                 else:
@@ -382,27 +462,65 @@ class BridgeService:
                     
                     # Only update the status if it changed
                     if current_status != last_status:
+                        # Get description or use "Unknown status" if not defined
                         status_desc = STATUS_DESCRIPTIONS.get(current_status, "Unknown status")
-                        
-                        # Thread-safe logging without print statements that can interfere with other threads
                         log().info(f"Order status: {current_status} : {status_desc} ({attempt+1}/{max_attempts})")
+                        
+                        # If we encounter an unknown status, record when we first saw it
+                        if status_desc == "Unknown status" and unknown_status_start is None:
+                            unknown_status_start = time.time()
+                            log().warning(f"Encountered unknown status '{current_status}'. Will monitor for {unknown_status_timeout}s")
+                        elif status_desc != "Unknown status":
+                            # Reset unknown status tracking if we see a known status
+                            unknown_status_start = None
+                            
                         last_status = current_status
+                    
+                    # Check if the unknown status has persisted long enough
+                    if unknown_status_start is not None and time.time() - unknown_status_start > unknown_status_timeout:
+                        # Check the transaction on the destination chain directly
+                        if check_destination_confirmation():
+                            log().success(f"Status '{current_status}' persisted and transaction confirmed on destination chain")
+                            return True
+                        else:
+                            log().info(f"Status '{current_status}' persisted but couldn't confirm on destination chain. Continuing to monitor.")
+                            # Reset the unknown status timer to check again later
+                            unknown_status_start = time.time()
                     
                     # Check if we've reached a terminal status
                     if current_status in SUCCESS_STATUSES:
                         log().success(f"Bridge transaction completed successfully: {order_id[:10]}...")
                         return True
                     elif current_status in REFUND_STATUSES:
+                        # Special handling for EXPIRED status - check if it was actually executed first
+                        if current_status == "Expired" and "executionTxHash" in order_status and order_status["executionTxHash"]:
+                            log().info(f"Transaction marked as Expired but has execution hash: {order_status['executionTxHash'][:10]}...")
+                            if check_destination_confirmation():
+                                log().success(f"Expired order confirmed on destination chain. Considering successful.")
+                                return True
+                        
                         log().warning(f"Bridge transaction eligible for refund: {order_id[:10]}...")
                         # Continue monitoring to see if it transitions to a refund state
                     elif current_status in FAILED_STATUSES:
                         log().error(f"Bridge transaction failed: {order_id[:10]}...")
                         return False
             except Exception as e:
-                log().error(f"Error checking order status: {str(e)}")
+                consecutive_errors += 1
+                log().error(f"Error checking order status (attempt {attempt+1}, error #{consecutive_errors}): {str(e)}")
+                
+                # If we've had too many consecutive errors, abort to prevent getting stuck
+                if consecutive_errors >= max_consecutive_errors:
+                    log().error(f"Too many consecutive errors ({consecutive_errors}). Aborting order monitoring.")
+                    return False
             
             # Sleep before the next attempt
             time.sleep(delay)
         
         log().warning(f"Max attempts reached. Transaction may still be in progress: {order_id[:10]}...")
+        
+        # Last chance - check if the transaction went through on the destination chain
+        if check_destination_confirmation():
+            log().success(f"Final check: Transaction confirmed on destination chain for order: {order_id[:10]}...")
+            return True
+            
         return False

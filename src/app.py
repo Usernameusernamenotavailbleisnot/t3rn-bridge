@@ -4,6 +4,7 @@ import sys
 import random
 import threading
 import queue
+import traceback
 from loguru import logger
 
 # Add the project root to the Python path
@@ -14,6 +15,7 @@ from src.services.bridge_service import BridgeService
 from src.utils.logger import setup_logger, get_masked_address, set_wallet_context, log
 from src.utils.retry import retry_with_backoff
 from src.utils.proxy import ProxyManager
+from src.utils.thread_safe import SessionManager, Web3ConnectionManager
 from src.utils.animations import (
     display_banner,
     display_processing_animation
@@ -40,7 +42,7 @@ def read_private_keys():
         sys.exit(1)
 
 def process_wallet(wallet_info):
-    """Process a single wallet."""
+    """Process a single wallet with improved timeout handling."""
     private_key = wallet_info["private_key"]
     index = wallet_info["index"]
     total_wallets = wallet_info["total_wallets"]
@@ -62,10 +64,19 @@ def process_wallet(wallet_info):
         # Use thread-local logger
         log().info(f"Processing wallet {masked_address} ({index+1}/{total_wallets})")
         
+        # Set a maximum time for processing this wallet (e.g., 45 minutes)
+        wallet_timeout = 45 * 60  # 45 minutes in seconds
+        wallet_start_time = time.time()
+        
         for j in range(config_data["bridge"]["repeat_count"]):
             # Check if shutdown has been requested
             if shutdown_event.is_set():
                 log().info("Shutdown requested, stopping wallet processing")
+                return
+                
+            # Check wallet timeout
+            if time.time() - wallet_start_time > wallet_timeout:
+                log().warning(f"Wallet processing timeout reached after {wallet_timeout//60} minutes")
                 return
                 
             # Random amount within configured range, but with limited decimal places (5 max)
@@ -77,49 +88,89 @@ def process_wallet(wallet_info):
             
             log().info(f"Bridge attempt {j+1}/{config_data['bridge']['repeat_count']}")
             
+            # First bridge: Base Sepolia to Optimism Sepolia
+            from_chain_1 = "base_sepolia"
+            to_chain_1 = "optimism_sepolia"
+            
             # Log transaction info
-            log().info(f"Bridging {amount} ETH from Base Sepolia to Optimism Sepolia")
+            log().info(f"Bridging {amount} ETH from {from_chain_1} to {to_chain_1}")
+            
+            # Set a timeout for this specific bridge operation
+            bridge_timeout = 20 * 60  # 20 minutes in seconds
+            bridge_start_time = time.time()
             
             # Perform Base Sepolia to Optimism Sepolia bridge
             tx_hash_base_to_op = bridge_service.bridge(
-                from_chain="base_sepolia",
-                to_chain="optimism_sepolia",
+                from_chain=from_chain_1,
+                to_chain=to_chain_1,
                 amount=amount
             )
             
             if tx_hash_base_to_op:
-                log().success(f"Base to Optimism bridge successful: {tx_hash_base_to_op[:10]}...")
+                log().success(f"{from_chain_1} to {to_chain_1} bridge successful: {tx_hash_base_to_op[:10]}...")
                 
-                # Wait for bridge to complete
+                # Wait for bridge to complete with a timeout, passing the source chain
                 log().info("Waiting for bridge completion...")
-                bridge_completed = bridge_service.wait_for_completion(tx_hash_base_to_op)
+                
+                # Check bridge timeout
+                remaining_timeout = max(10, wallet_timeout - int(time.time() - wallet_start_time))
+                timeout_minutes = min(15, remaining_timeout // 60)
+                
+                bridge_completed = bridge_service.wait_for_completion(
+                    tx_hash=tx_hash_base_to_op,
+                    timeout_minutes=timeout_minutes,
+                    source_chain=from_chain_1  # Pass the source chain
+                )
                 
                 if bridge_completed:
                     # Check if shutdown has been requested
                     if shutdown_event.is_set():
                         log().info("Shutdown requested, stopping wallet processing")
                         return
+                    
+                    # Check wallet timeout
+                    if time.time() - wallet_start_time > wallet_timeout:
+                        log().warning(f"Wallet processing timeout reached after {wallet_timeout//60} minutes")
+                        return
+                        
+                    # Check bridge timeout
+                    if time.time() - bridge_start_time > bridge_timeout:
+                        log().warning(f"Bridge operation timeout reached after {bridge_timeout//60} minutes")
+                        continue  # Skip to next bridge attempt
+                    
+                    # Second bridge: Optimism Sepolia to Base Sepolia
+                    from_chain_2 = "optimism_sepolia"
+                    to_chain_2 = "base_sepolia"
                         
                     # Perform Optimism Sepolia to Base Sepolia bridge
-                    log().info(f"Bridging {amount} ETH from Optimism Sepolia to Base Sepolia")
+                    log().info(f"Bridging {amount} ETH from {from_chain_2} to {to_chain_2}")
                     tx_hash_op_to_base = bridge_service.bridge(
-                        from_chain="optimism_sepolia",
-                        to_chain="base_sepolia",
+                        from_chain=from_chain_2,
+                        to_chain=to_chain_2,
                         amount=amount
                     )
                         
                     if tx_hash_op_to_base:
-                        log().success(f"Optimism to Base bridge successful: {tx_hash_op_to_base[:10]}...")
+                        log().success(f"{from_chain_2} to {to_chain_2} bridge successful: {tx_hash_op_to_base[:10]}...")
                         
-                        # Wait for bridge to complete
+                        # Wait for bridge to complete with a timeout, passing the source chain
                         log().info("Waiting for bridge completion...")
-                        bridge_service.wait_for_completion(tx_hash_op_to_base)
+                        
+                        # Calculate remaining timeout
+                        remaining_timeout = max(10, wallet_timeout - int(time.time() - wallet_start_time))
+                        timeout_minutes = min(15, remaining_timeout // 60)
+                        
+                        bridge_service.wait_for_completion(
+                            tx_hash=tx_hash_op_to_base,
+                            timeout_minutes=timeout_minutes,
+                            source_chain=from_chain_2  # Pass the source chain
+                        )
                     else:
-                        log().error("Optimism to Base bridge failed")
+                        log().error(f"{from_chain_2} to {to_chain_2} bridge failed")
                 else:
-                    log().error("Base to Optimism bridge completion failed or timed out")
+                    log().error(f"{from_chain_1} to {to_chain_1} bridge completion failed or timed out")
             else:
-                log().error("Base to Optimism bridge transaction failed")
+                log().error(f"{from_chain_1} to {to_chain_1} bridge transaction failed")
                 # Add a delay before attempting next bridge
                 delay_time = 60
                 log().info(f"Waiting {delay_time} seconds before next attempt...")
@@ -129,6 +180,12 @@ def process_wallet(wallet_info):
                     if shutdown_event.is_set():
                         log().info("Shutdown requested, stopping wallet processing")
                         return
+                    
+                    # Check wallet timeout
+                    if time.time() - wallet_start_time > wallet_timeout:
+                        log().warning(f"Wallet processing timeout reached during delay")
+                        return
+                        
                     time.sleep(1)
             
     except Exception as e:
@@ -137,53 +194,57 @@ def process_wallet(wallet_info):
 
 def worker_thread():
     """Worker thread function to process wallets from the queue."""
-    # Initialize thread-local context for this thread
-    set_wallet_context("")
-    
-    thread_id = threading.get_ident()
-    log().debug(f"Worker thread {thread_id} started")
-    
-    while not shutdown_event.is_set():
-        try:
-            # Get a wallet from the queue with a timeout
+    try:
+        # Initialize thread-local context for this thread
+        set_wallet_context("")
+        
+        thread_id = threading.get_ident()
+        log().debug(f"Worker thread {thread_id} started")
+        
+        while not shutdown_event.is_set():
             try:
-                wallet_info = wallet_queue.get(timeout=1)
-            except queue.Empty:
-                # Queue is empty, check if we should exit
-                continue
-            
-            # Process the wallet
-            process_wallet(wallet_info)
-            
-            # Mark task as done
-            wallet_queue.task_done()
-            
-            # Apply delay between wallets
-            config_data = wallet_info["config"]
-            delay_time = config_data['delay']['between_wallets']
-            
-            # Reset wallet context for general logging
-            set_wallet_context("")
-            log().info(f"Waiting {delay_time} seconds before next wallet")
-            
-            # Wait with timeout check
-            for _ in range(delay_time):
-                if shutdown_event.is_set():
-                    break
-                time.sleep(1)
-            
-        except Exception as e:
-            # Reset wallet context for error logging
-            set_wallet_context("")
-            log().error(f"Error in worker thread: {str(e)}")
-            
-            # Mark task as done in case of error
-            try:
+                # Get a wallet from the queue with a timeout
+                try:
+                    wallet_info = wallet_queue.get(timeout=1)
+                except queue.Empty:
+                    # Queue is empty, check if we should exit
+                    continue
+                
+                # Process the wallet
+                process_wallet(wallet_info)
+                
+                # Mark task as done
                 wallet_queue.task_done()
-            except:
-                pass
-    
-    log().debug(f"Worker thread {thread_id} finished")
+                
+                # Apply delay between wallets
+                config_data = wallet_info["config"]
+                delay_time = config_data['delay']['between_wallets']
+                
+                # Reset wallet context for general logging
+                set_wallet_context("")
+                log().info(f"Waiting {delay_time} seconds before next wallet")
+                
+                # Wait with timeout check
+                for _ in range(delay_time):
+                    if shutdown_event.is_set():
+                        break
+                    time.sleep(1)
+                
+            except Exception as e:
+                # Reset wallet context for error logging
+                set_wallet_context("")
+                log().error(f"Error in worker thread: {str(e)}")
+                
+                # Mark task as done in case of error
+                try:
+                    wallet_queue.task_done()
+                except:
+                    pass
+    finally:
+        # Clean up thread-specific resources when thread exits
+        SessionManager.close_sessions()
+        Web3ConnectionManager.close_connections()
+        log().debug(f"Worker thread {thread_id} finished and resources cleaned up")
 
 def main():
     """Main application entry point."""

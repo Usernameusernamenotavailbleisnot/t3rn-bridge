@@ -3,7 +3,10 @@ from web3.middleware import geth_poa_middleware
 from loguru import logger
 from eth_account import Account
 import time
+import traceback
+from hexbytes import HexBytes
 
+from src.utils.thread_safe import Web3ConnectionManager
 from src.utils.retry import retry_with_backoff
 from src.utils.logger import log
 
@@ -15,7 +18,6 @@ class Web3Service:
         self.private_key = private_key
         self.config = config
         self.proxy = proxy
-        self.web3_connections = {}
         self.account = Account.from_key(private_key)
     
     def get_account_address(self):
@@ -24,8 +26,12 @@ class Web3Service:
     
     def get_web3(self, chain_name):
         """Get Web3 connection for the specified chain."""
-        if chain_name in self.web3_connections:
-            return self.web3_connections[chain_name]
+        # Get thread-specific web3 connections dictionary
+        web3_connections = Web3ConnectionManager.get_web3_connections()
+        
+        # Check if connection exists for this chain in the current thread
+        if chain_name in web3_connections:
+            return web3_connections[chain_name]
         
         chain_config = self.config["chains"].get(chain_name)
         if not chain_config:
@@ -42,8 +48,8 @@ class Web3Service:
             log().error(f"Failed to connect to {chain_name} RPC at {rpc_url}")
             raise ConnectionError(f"Failed to connect to {chain_name} RPC")
         
-        # Cache connection
-        self.web3_connections[chain_name] = web3
+        # Cache connection in thread-local storage
+        web3_connections[chain_name] = web3
         
         return web3
     
