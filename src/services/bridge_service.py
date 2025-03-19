@@ -5,9 +5,11 @@ from web3 import Web3
 import requests
 from loguru import logger
 import traceback
+from datetime import datetime
+import sys
 
 from src.services.web3_service import Web3Service
-from src.constants.constants import API_ENDPOINTS, TX_STATUS
+from src.constants.constants import API_ENDPOINTS, TX_STATUS, STATUS_DESCRIPTIONS, SUCCESS_STATUSES, REFUND_STATUSES, FAILED_STATUSES
 from src.utils.retry import retry_with_backoff
 from hexbytes import HexBytes
 
@@ -155,8 +157,8 @@ class BridgeService:
         if "maxReward" in estimate and estimate["maxReward"].get("hex"):
             max_reward_hex = estimate["maxReward"]["hex"][2:]  # Remove '0x'
         else:
-            # Fallback to a fixed amount (0.2 ETH)
-            max_reward_hex = "02c68af0bb140000"
+            # Use the actual bridge amount as max reward instead of hardcoded value
+            max_reward_hex = hex(amount_wei)[2:]  # Convert to hex and remove '0x'
             
         max_reward_padded = '0' * (64 - len(max_reward_hex)) + max_reward_hex
         
@@ -183,12 +185,26 @@ class BridgeService:
         # Get nonce
         nonce = self.web3_service.get_nonce(from_chain)
         
-        # Build transaction
+        # Build initial transaction without gas limit for estimation
+        tx_for_estimation = {
+            "from": self.wallet_address,
+            "to": bridge_contract,
+            "value": amount_wei,
+            "gasPrice": gas_price_with_multiplier,
+            "nonce": nonce,
+            "chainId": from_chain_config["chain_id"],
+            "data": calldata
+        }
+        
+        # Estimate gas for this transaction
+        estimated_gas = self.web3_service.estimate_gas(from_chain, tx_for_estimation)
+        
+        # Build final transaction with estimated gas
         tx = {
             "from": self.wallet_address,
             "to": bridge_contract,
             "value": amount_wei,
-            "gas": 136229,  # Use a reasonable gas limit from HAR file
+            "gas": estimated_gas,
             "gasPrice": gas_price_with_multiplier,
             "nonce": nonce,
             "chainId": from_chain_config["chain_id"],
@@ -332,6 +348,12 @@ class BridgeService:
         
         logger.info(f"Monitoring order ID: {order_id[:10]}... for completion")
         
+        # Track the last status to avoid repeated updates
+        last_status = None
+        
+        # Use a custom logger with specific format for status updates
+        status_logger = logger.bind(status_update=True)
+        
         for attempt in range(max_attempts):
             try:
                 # Ensure order_id is a string without '0x' prefix if needed by API
@@ -344,23 +366,40 @@ class BridgeService:
                 order_status = self.get_order_status(order_id_str)
                 
                 if not order_status:
-                    logger.info(f"Order not found yet. Waiting... ({attempt+1}/{max_attempts})")
-                    time.sleep(delay)
-                    continue
-                
-                status = order_status.get("status")
-                
-                if status == TX_STATUS["EXECUTED"]:
-                    logger.success(f"Bridge transaction completed: {order_id[:10]}...")
-                    return True
-                elif status == TX_STATUS["FAILED"]:
-                    logger.error(f"Bridge transaction failed: {order_id[:10]}...")
-                    return False
+                    current_status = "Placed"  # Assume it's placed but not yet registered in API
+                    
+                    # Only update the status if it changed
+                    if current_status != last_status:
+                        status_desc = STATUS_DESCRIPTIONS.get(current_status, "Unknown status")
+                        print(f"\r{' ' * 150}", end="")  # Clear the line with many spaces
+                        print(f"\r", end="")  # Move cursor to the beginning of the line
+                        logger.info(f"Order status: {current_status} : {status_desc} ({attempt+1}/{max_attempts})")
+                        last_status = current_status
                 else:
-                    logger.info(f"Bridge status: {status}. Waiting... ({attempt+1}/{max_attempts})")
+                    current_status = order_status.get("status")
+                    
+                    # Only update the status if it changed
+                    if current_status != last_status:
+                        status_desc = STATUS_DESCRIPTIONS.get(current_status, "Unknown status")
+                        print(f"\r{' ' * 150}", end="")  # Clear the line with many spaces
+                        print(f"\r", end="")  # Move cursor to the beginning of the line
+                        logger.info(f"Order status: {current_status} : {status_desc} ({attempt+1}/{max_attempts})")
+                        last_status = current_status
+                    
+                    # Check if we've reached a terminal status
+                    if current_status in SUCCESS_STATUSES:
+                        logger.success(f"Bridge transaction completed successfully: {order_id[:10]}...")
+                        return True
+                    elif current_status in REFUND_STATUSES:
+                        logger.warning(f"Bridge transaction eligible for refund: {order_id[:10]}...")
+                        # Continue monitoring to see if it transitions to a refund state
+                    elif current_status in FAILED_STATUSES:
+                        logger.error(f"Bridge transaction failed: {order_id[:10]}...")
+                        return False
             except Exception as e:
                 logger.error(f"Error checking order status: {str(e)}")
             
+            # Sleep before the next attempt
             time.sleep(delay)
         
         logger.warning(f"Max attempts reached. Transaction may still be in progress: {order_id[:10]}...")

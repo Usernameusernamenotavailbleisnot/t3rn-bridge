@@ -55,6 +55,36 @@ class Web3Service:
         return gas_price
     
     @retry_with_backoff
+    def estimate_gas(self, chain_name, tx_params):
+        """
+        Estimate gas needed for a transaction.
+        
+        Args:
+            chain_name (str): Chain name
+            tx_params (dict): Transaction parameters
+            
+        Returns:
+            int: Estimated gas amount
+        """
+        web3 = self.get_web3(chain_name)
+        
+        # Create a copy of tx_params without the gas parameter
+        tx_for_estimation = {k: v for k, v in tx_params.items() if k != 'gas'}
+        
+        try:
+            estimated_gas = web3.eth.estimate_gas(tx_for_estimation)
+            # Add a small buffer to ensure transaction success (10%)
+            gas_with_buffer = int(estimated_gas * 1.1)
+            logger.debug(f"Estimated gas on {chain_name}: {estimated_gas} (with buffer: {gas_with_buffer})")
+            return gas_with_buffer
+        except Exception as e:
+            logger.error(f"Error estimating gas on {chain_name}: {str(e)}")
+            # Fallback to default gas limit
+            default_gas = 150000  # Higher default than before
+            logger.warning(f"Using fallback gas limit: {default_gas}")
+            return default_gas
+    
+    @retry_with_backoff
     def get_nonce(self, chain_name):
         """Get current nonce for the account on the specified chain."""
         web3 = self.get_web3(chain_name)
@@ -118,15 +148,17 @@ class Web3Service:
             logger.error(f"Insufficient balance on {chain_name}. Have: {web3.from_wei(balance, 'ether')} ETH, Need: {web3.from_wei(required, 'ether')} ETH")
             return None
         
-        # Log transaction details (masked for privacy)
-        masked_tx = dict(transaction)
-        if "data" in masked_tx and len(str(masked_tx["data"])) > 20:
-            data_str = str(masked_tx["data"])
-            masked_tx["data"] = f"{data_str[:10]}...{data_str[-8:]}"
-        masked_tx['value'] = web3.from_wei(masked_tx.get('value', 0), 'ether')
-        masked_tx['gasPrice'] = web3.from_wei(masked_tx.get('gasPrice', 0), 'gwei')
+        # Create a more concise log message
+        to_addr = transaction.get('to', 'N/A')
+        to_addr_short = f"{to_addr[:6]}...{to_addr[-4:]}" if to_addr and len(to_addr) > 10 else to_addr
+        value_eth = web3.from_wei(transaction.get('value', 0), 'ether')
+        gas_price_gwei = web3.from_wei(transaction.get('gasPrice', 0), 'gwei')
+        gas_limit = transaction.get('gas', 0)
         
-        logger.info(f"Sending transaction on {chain_name}: {masked_tx}")
+        # Log a more concise transaction message
+        logger.info(
+            f"Tx: {chain_name} | To: {to_addr_short} | Value: {value_eth} ETH | Gas: {gas_price_gwei} Gwei | Limit: {gas_limit}"
+        )
         
         try:
             # Sign transaction
