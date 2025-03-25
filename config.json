@@ -9,8 +9,8 @@
     "bridge": {
       "repeat_count": 1,
       "amount": {
-        "min": 0.11,
-        "max": 0.12
+        "min": 1,
+        "max": 1.5
       },
       "gas_multiplier": 1.1
     },
@@ -21,7 +21,7 @@
     "chains": {
       "base_sepolia": {
         "chain_id": 84532,
-        "rpc_url": "https://sepolia.base.org",
+        "rpc_url": "https://base-sepolia-rpc.publicnode.com",
         "bridge_contract": "0xCEE0372632a37Ba4d0499D1E2116eCff3A17d3C3",
         "api_name": "bast"
       },
