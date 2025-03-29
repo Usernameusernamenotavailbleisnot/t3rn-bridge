@@ -9,8 +9,8 @@
     "bridge": {
       "repeat_count": 1,
       "amount": {
-        "min": 1,
-        "max": 1.5
+        "min": 1.6,
+        "max": 1.7
       },
       "gas_multiplier": 1.1
     },
@@ -27,7 +27,7 @@
       },
       "optimism_sepolia": {
         "chain_id": 11155420,
-        "rpc_url": "https://sepolia.optimism.io",
+        "rpc_url": "https://optimism-sepolia-rpc.publicnode.com",
         "bridge_contract": "0xb6Def636914Ae60173d9007E732684a9eEDEF26E",
         "api_name": "opst"
       }
