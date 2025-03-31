@@ -85,9 +85,9 @@ class BridgeService:
             "fromChain": from_chain_config["api_name"],
             "toChain": to_chain_config["api_name"],
             "amountWei": amount_wei,
-            "executorTipUSD": 0,
+            "executorTipUSD": 1,
             "overpayOptionPercentage": 0,
-            "spreadOptionPercentage": 0
+            "spreadOptionPercentage": 1
         }
         
         log().debug(f"Estimate payload: {payload}")
