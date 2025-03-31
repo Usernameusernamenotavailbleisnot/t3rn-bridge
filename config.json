@@ -9,8 +9,8 @@
     "bridge": {
       "repeat_count": 1,
       "amount": {
-        "min": 5,
-        "max": 5.1
+        "min": 7,
+        "max": 7.1
       },
       "gas_multiplier": 1.1
     },
