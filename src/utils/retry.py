@@ -36,6 +36,12 @@ def retry_with_backoff(func):
                 attempt += 1
                 last_exception = e
                 
+                # Special handling for certain errors we want to propagate immediately
+                error_str = str(e)
+                if "RO#7" in error_str:
+                    # Propagate RO#7 errors directly without retrying
+                    raise
+                    
                 if attempt >= max_attempts:
                     logger.error(f"All {max_attempts} retry attempts failed")
                     raise last_exception
