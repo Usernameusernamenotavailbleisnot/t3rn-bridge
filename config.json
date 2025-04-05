@@ -69,7 +69,7 @@
       "api_name": "blst"
     },
     "unichain_sepolia": {
-      "chain_id": 4338,
+      "chain_id": 1301,
       "rpc_url": "https://unichain-sepolia-rpc.publicnode.com",
       "bridge_contract": "0x1cEAb5967E5f078Fa0FEC3DFfD0394Af1fEeBCC9",
       "api_name": "unit"
