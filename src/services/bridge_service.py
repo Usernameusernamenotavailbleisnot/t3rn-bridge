@@ -213,8 +213,40 @@ class BridgeService:
             "data": calldata
         }
         
-        # Estimate gas for this transaction
-        estimated_gas = self.web3_service.estimate_gas(from_chain, tx_for_estimation)
+        # New: Retry gas estimation with specific error handling for RO#7
+        retry_count = 0
+        max_retries = 100
+        estimated_gas = None
+        
+        while retry_count < max_retries:
+            try:
+                # Estimate gas for this transaction
+                estimated_gas = self.web3_service.estimate_gas(from_chain, tx_for_estimation)
+                # If successful, break the loop
+                break
+            except Exception as e:
+                error_str = str(e)
+                if "RO#7" in error_str:
+                    retry_count += 1
+                    log().warning(f"RO#7 error detected during gas estimation (attempt {retry_count}/{max_retries}). This usually means bridge temporarily unavailable.")
+                    
+                    if retry_count < max_retries:
+                        # Wait before retrying (exponential backoff)
+                        wait_time = 1 * (1 ** (retry_count - 1))
+                        log().info(f"Waiting {wait_time} seconds before retry...")
+                        time.sleep(wait_time)
+                    else:
+                        log().error(f"Failed to estimate gas after {max_retries} attempts: {error_str}")
+                        return None
+                else:
+                    # Different error, log and return None
+                    log().error(f"Error estimating gas: {error_str}")
+                    return None
+        
+        # If we couldn't estimate gas after all retries, return None
+        if estimated_gas is None:
+            log().error("Failed to estimate gas for the transaction")
+            return None
         
         # Build final transaction with estimated gas
         tx = {
@@ -336,8 +368,13 @@ class BridgeService:
             source_chain (str, optional): Source chain where the transaction was initiated
             
         Returns:
-            bool: True if completed, False otherwise
+            bool: True if completed or skipped, False otherwise
         """
+        # Check if we should skip waiting based on config
+        if not self.config.get("bridge", {}).get("wait_for_completion", True):
+            log().info(f"Skipping wait for completion for transaction {tx_hash[:10]}... as configured")
+            return True
+            
         if not tx_hash:
             log().error("No transaction hash provided - cannot wait for completion")
             return False
@@ -372,7 +409,17 @@ class BridgeService:
             log().info(f"Using provided source chain: {from_chain}")
         
         # Determine destination chain based on the source chain
-        to_chain = "optimism_sepolia" if from_chain == "base_sepolia" else "base_sepolia"
+        to_chain = None
+        if "bridge_paths" in self.config.get("bridge", {}):
+            # Look for the path containing this source chain
+            for path in self.config["bridge"]["bridge_paths"]:
+                if path["from_chain"] == from_chain:
+                    to_chain = path["to_chain"]
+                    break
+        
+        # If no path found, use default logic
+        if not to_chain:
+            to_chain = "optimism_sepolia" if from_chain == "base_sepolia" else "base_sepolia"
         
         # Add a timeout for extracting order ID to prevent getting stuck
         extract_attempts = 3
