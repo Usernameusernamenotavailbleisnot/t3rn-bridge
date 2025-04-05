@@ -1,39 +1,82 @@
 {
-    "use_proxy": true,
-    "thread_count": 1,
-    "retries": {
-      "max_attempts": 5,
-      "backoff_factor": 2,
-      "initial_wait": 1
+  "use_proxy": false,
+  "thread_count": 1,
+  "retries": {
+    "max_attempts": 10,
+    "backoff_factor": 2,
+    "initial_wait": 1
+  },
+  "bridge": {
+    "repeat_count": 10,
+    "amount": {
+      "min": 3,
+      "max": 3
     },
-    "bridge": {
-      "repeat_count": 1,
-      "amount": {
-        "min": 3.1,
-        "max": 3.2
+    "gas_multiplier": 1.1,
+    "wait_for_completion": false,
+    "custom_flow": true,
+    "bridge_paths": [
+      {
+        "from_chain": "base_sepolia",
+        "to_chain": "optimism_sepolia"
       },
-      "gas_multiplier": 1.1
-    },
-    "delay": {
-      "between_wallets": 60,
-      "after_completion": 90000
-    },
-    "chains": {
-      "base_sepolia": {
-        "chain_id": 84532,
-        "rpc_url": "https://base-sepolia-rpc.publicnode.com",
-        "bridge_contract": "0xCEE0372632a37Ba4d0499D1E2116eCff3A17d3C3",
-        "api_name": "bast"
+      {
+        "from_chain": "optimism_sepolia",
+        "to_chain": "arbitrum_sepolia"
       },
-      "optimism_sepolia": {
-        "chain_id": 11155420,
-        "rpc_url": "https://optimism-sepolia-rpc.publicnode.com",
-        "bridge_contract": "0xb6Def636914Ae60173d9007E732684a9eEDEF26E",
-        "api_name": "opst"
+      {
+        "from_chain": "arbitrum_sepolia",
+        "to_chain": "blast_sepolia"
+      },
+      {
+        "from_chain": "blast_sepolia",
+        "to_chain": "unichain_sepolia"
+      },
+      {
+        "from_chain": "unichain_sepolia",
+        "to_chain": "base_sepolia"
       }
+    ]
+  },
+  "delay": {
+    "between_wallets": 60,
+    "between_bridges": 30,
+    "after_completion": 90000
+  },
+  "chains": {
+    "base_sepolia": {
+      "chain_id": 84532,
+      "rpc_url": "https://base-sepolia-rpc.publicnode.com",
+      "bridge_contract": "0xCEE0372632a37Ba4d0499D1E2116eCff3A17d3C3",
+      "api_name": "bast"
     },
-    "api": {
-      "base_url": "https://api.t2rn.io",
-      "timeout": 30
+    "optimism_sepolia": {
+      "chain_id": 11155420,
+      "rpc_url": "https://optimism-sepolia-rpc.publicnode.com",
+      "bridge_contract": "0xb6Def636914Ae60173d9007E732684a9eEDEF26E",
+      "api_name": "opst"
+    },
+    "arbitrum_sepolia": {
+      "chain_id": 421614,
+      "rpc_url": "https://arbitrum-sepolia-rpc.publicnode.com",
+      "bridge_contract": "0x22B65d0B9b59af4D3Ed59F18b9Ad53f5F4908B54",
+      "api_name": "arbt"
+    },
+    "blast_sepolia": {
+      "chain_id": 168587773,
+      "rpc_url": "https://sepolia.blast.io",
+      "bridge_contract": "0x36B2415644d47b8f646697b6c4C5a9D55400f2Dd",
+      "api_name": "blst"
+    },
+    "unichain_sepolia": {
+      "chain_id": 4338,
+      "rpc_url": "https://unichain-sepolia-rpc.publicnode.com",
+      "bridge_contract": "0x1cEAb5967E5f078Fa0FEC3DFfD0394Af1fEeBCC9",
+      "api_name": "unit"
     }
+  },
+  "api": {
+    "base_url": "https://api.t2rn.io",
+    "timeout": 30
   }
+}
