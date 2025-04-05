@@ -133,6 +133,9 @@ class Web3Service:
             
         Returns:
             int: Estimated gas amount
+            
+        Raises:
+            Exception: Passes through any error from the chain to allow specific handling
         """
         web3 = self.get_web3(chain_name)
         
@@ -146,11 +149,12 @@ class Web3Service:
             log().debug(f"Estimated gas on {chain_name}: {estimated_gas} (with buffer: {gas_with_buffer})")
             return gas_with_buffer
         except Exception as e:
-            log().error(f"Error estimating gas on {chain_name}: {str(e)}")
-            # Fallback to default gas limit
-            default_gas = 150000  # Higher default than before
-            log().warning(f"Using fallback gas limit: {default_gas}")
-            return default_gas
+            # Log the error but don't catch it - let it propagate up
+            error_message = str(e)
+            log().error(f"Error estimating gas on {chain_name}: {error_message}")
+            
+            # Important: Re-raise the original exception to allow specific error handling
+            raise
     
     @retry_with_backoff
     def get_nonce(self, chain_name):
