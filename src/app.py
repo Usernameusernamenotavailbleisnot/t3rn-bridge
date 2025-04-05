@@ -5,6 +5,7 @@ import random
 import threading
 import queue
 import traceback
+import signal
 from loguru import logger
 
 # Add the project root to the Python path
@@ -27,6 +28,26 @@ wallet_queue = queue.Queue()
 # Global event to signal threads to terminate
 shutdown_event = threading.Event()
 
+def signal_handler(sig, frame):
+    """Handle Ctrl+C properly"""
+    logger.info("\nKeyboard interrupt detected (Ctrl+C). Shutting down gracefully...")
+    # Set shutdown event to signal all threads to terminate
+    shutdown_event.set()
+    logger.info("Waiting for threads to terminate (max 5 seconds)...")
+    
+    # Allow up to 5 seconds for threads to terminate gracefully
+    exit_timer = threading.Timer(5.0, force_exit)
+    exit_timer.daemon = True
+    exit_timer.start()
+
+def force_exit():
+    """Force exit if threads won't terminate gracefully"""
+    logger.error("Timeout waiting for threads to terminate. Forcing exit.")
+    sys.exit(1)
+
+# Register signal handler for keyboard interrupt
+signal.signal(signal.SIGINT, signal_handler)
+
 def read_private_keys():
     """Read private keys from pk.txt file."""
     try:
@@ -42,7 +63,7 @@ def read_private_keys():
         sys.exit(1)
 
 def process_wallet(wallet_info):
-    """Process a single wallet with improved timeout handling."""
+    """Process a single wallet with custom bridge flow."""
     private_key = wallet_info["private_key"]
     index = wallet_info["index"]
     total_wallets = wallet_info["total_wallets"]
@@ -88,105 +109,195 @@ def process_wallet(wallet_info):
             
             log().info(f"Bridge attempt {j+1}/{config_data['bridge']['repeat_count']}")
             
-            # First bridge: Base Sepolia to Optimism Sepolia
-            from_chain_1 = "base_sepolia"
-            to_chain_1 = "optimism_sepolia"
-            
-            # Log transaction info
-            log().info(f"Bridging {amount} ETH from {from_chain_1} to {to_chain_1}")
-            
-            # Set a timeout for this specific bridge operation
-            bridge_timeout = 20 * 60  # 20 minutes in seconds
-            bridge_start_time = time.time()
-            
-            # Perform Base Sepolia to Optimism Sepolia bridge
-            tx_hash_base_to_op = bridge_service.bridge(
-                from_chain=from_chain_1,
-                to_chain=to_chain_1,
-                amount=amount
-            )
-            
-            if tx_hash_base_to_op:
-                log().success(f"{from_chain_1} to {to_chain_1} bridge successful: {tx_hash_base_to_op[:10]}...")
+            # Use custom bridge flow if configured
+            if config_data["bridge"].get("custom_flow", False) and "bridge_paths" in config_data["bridge"]:
+                bridge_paths = config_data["bridge"]["bridge_paths"]
+                log().info(f"Using custom bridge flow with {len(bridge_paths)} paths")
                 
-                # Wait for bridge to complete with a timeout, passing the source chain
-                log().info("Waiting for bridge completion...")
-                
-                # Check bridge timeout
-                remaining_timeout = max(10, wallet_timeout - int(time.time() - wallet_start_time))
-                timeout_minutes = min(15, remaining_timeout // 60)
-                
-                bridge_completed = bridge_service.wait_for_completion(
-                    tx_hash=tx_hash_base_to_op,
-                    timeout_minutes=timeout_minutes,
-                    source_chain=from_chain_1  # Pass the source chain
-                )
-                
-                if bridge_completed:
-                    # Check if shutdown has been requested
-                    if shutdown_event.is_set():
-                        log().info("Shutdown requested, stopping wallet processing")
-                        return
+                # Process each bridge path
+                for i, path in enumerate(bridge_paths):
+                    from_chain = path["from_chain"]
+                    to_chain = path["to_chain"]
                     
-                    # Check wallet timeout
-                    if time.time() - wallet_start_time > wallet_timeout:
-                        log().warning(f"Wallet processing timeout reached after {wallet_timeout//60} minutes")
-                        return
-                        
-                    # Check bridge timeout
-                    if time.time() - bridge_start_time > bridge_timeout:
-                        log().warning(f"Bridge operation timeout reached after {bridge_timeout//60} minutes")
-                        continue  # Skip to next bridge attempt
+                    # Log transaction info
+                    log().info(f"Bridge {i+1}/{len(bridge_paths)}: {amount} ETH from {from_chain} to {to_chain}")
                     
-                    # Second bridge: Optimism Sepolia to Base Sepolia
-                    from_chain_2 = "optimism_sepolia"
-                    to_chain_2 = "base_sepolia"
-                        
-                    # Perform Optimism Sepolia to Base Sepolia bridge
-                    log().info(f"Bridging {amount} ETH from {from_chain_2} to {to_chain_2}")
-                    tx_hash_op_to_base = bridge_service.bridge(
-                        from_chain=from_chain_2,
-                        to_chain=to_chain_2,
+                    # Set a timeout for this specific bridge operation
+                    bridge_timeout = 20 * 60  # 20 minutes in seconds
+                    bridge_start_time = time.time()
+                    
+                    # Perform the bridge
+                    tx_hash = bridge_service.bridge(
+                        from_chain=from_chain,
+                        to_chain=to_chain,
                         amount=amount
                     )
+                    
+                    if tx_hash:
+                        log().success(f"{from_chain} to {to_chain} bridge initiated: {tx_hash[:10]}...")
                         
-                    if tx_hash_op_to_base:
-                        log().success(f"{from_chain_2} to {to_chain_2} bridge successful: {tx_hash_op_to_base[:10]}...")
+                        # Check if we should wait for completion
+                        if config_data["bridge"].get("wait_for_completion", True):
+                            log().info("Waiting for bridge completion...")
+                            
+                            # Check bridge timeout
+                            remaining_timeout = max(10, wallet_timeout - int(time.time() - wallet_start_time))
+                            timeout_minutes = min(15, remaining_timeout // 60)
+                            
+                            bridge_completed = bridge_service.wait_for_completion(
+                                tx_hash=tx_hash,
+                                timeout_minutes=timeout_minutes,
+                                source_chain=from_chain  # Pass the source chain
+                            )
+                            
+                            if not bridge_completed:
+                                log().error(f"Bridge from {from_chain} to {to_chain} failed or timed out")
+                                # Consider if you want to continue or break the loop
+                                # For now, we'll continue to the next bridge path
+                    else:
+                        log().error(f"Bridge from {from_chain} to {to_chain} transaction failed")
+                    
+                    # Delay between bridges if not the last bridge
+                    if i < len(bridge_paths) - 1:
+                        delay_time = config_data['delay'].get('between_bridges', 30)
+                        log().info(f"Waiting {delay_time} seconds before next bridge...")
                         
-                        # Wait for bridge to complete with a timeout, passing the source chain
+                        # Wait with timeout check
+                        for _ in range(delay_time):
+                            if shutdown_event.is_set():
+                                log().info("Shutdown requested, stopping wallet processing")
+                                return
+                            
+                            # Check wallet timeout
+                            if time.time() - wallet_start_time > wallet_timeout:
+                                log().warning(f"Wallet processing timeout reached during delay")
+                                return
+                                
+                            time.sleep(1)
+            else:
+                # Use default bridge flow (Base Sepolia <-> Optimism Sepolia)
+                # First bridge: Base Sepolia to Optimism Sepolia
+                from_chain_1 = "base_sepolia"
+                to_chain_1 = "optimism_sepolia"
+                
+                # Log transaction info
+                log().info(f"Bridging {amount} ETH from {from_chain_1} to {to_chain_1}")
+                
+                # Set a timeout for this specific bridge operation
+                bridge_timeout = 20 * 60  # 20 minutes in seconds
+                bridge_start_time = time.time()
+                
+                # Perform Base Sepolia to Optimism Sepolia bridge
+                tx_hash_base_to_op = bridge_service.bridge(
+                    from_chain=from_chain_1,
+                    to_chain=to_chain_1,
+                    amount=amount
+                )
+                
+                if tx_hash_base_to_op:
+                    log().success(f"{from_chain_1} to {to_chain_1} bridge successful: {tx_hash_base_to_op[:10]}...")
+                    
+                    # Wait for bridge to complete only if configured to do so
+                    if config_data["bridge"].get("wait_for_completion", True):
                         log().info("Waiting for bridge completion...")
                         
-                        # Calculate remaining timeout
+                        # Check bridge timeout
                         remaining_timeout = max(10, wallet_timeout - int(time.time() - wallet_start_time))
                         timeout_minutes = min(15, remaining_timeout // 60)
                         
-                        bridge_service.wait_for_completion(
-                            tx_hash=tx_hash_op_to_base,
+                        bridge_completed = bridge_service.wait_for_completion(
+                            tx_hash=tx_hash_base_to_op,
                             timeout_minutes=timeout_minutes,
-                            source_chain=from_chain_2  # Pass the source chain
+                            source_chain=from_chain_1  # Pass the source chain
                         )
-                    else:
-                        log().error(f"{from_chain_2} to {to_chain_2} bridge failed")
-                else:
-                    log().error(f"{from_chain_1} to {to_chain_1} bridge completion failed or timed out")
-            else:
-                log().error(f"{from_chain_1} to {to_chain_1} bridge transaction failed")
-                # Add a delay before attempting next bridge
-                delay_time = 60
-                log().info(f"Waiting {delay_time} seconds before next attempt...")
-                
-                # Wait with timeout check
-                for _ in range(delay_time):
-                    if shutdown_event.is_set():
-                        log().info("Shutdown requested, stopping wallet processing")
-                        return
-                    
-                    # Check wallet timeout
-                    if time.time() - wallet_start_time > wallet_timeout:
-                        log().warning(f"Wallet processing timeout reached during delay")
-                        return
                         
-                    time.sleep(1)
+                        if bridge_completed:
+                            # Second bridge: Optimism Sepolia to Base Sepolia
+                            from_chain_2 = "optimism_sepolia"
+                            to_chain_2 = "base_sepolia"
+                                
+                            # Perform Optimism Sepolia to Base Sepolia bridge
+                            log().info(f"Bridging {amount} ETH from {from_chain_2} to {to_chain_2}")
+                            tx_hash_op_to_base = bridge_service.bridge(
+                                from_chain=from_chain_2,
+                                to_chain=to_chain_2,
+                                amount=amount
+                            )
+                                
+                            if tx_hash_op_to_base:
+                                log().success(f"{from_chain_2} to {to_chain_2} bridge successful: {tx_hash_op_to_base[:10]}...")
+                                
+                                # Wait for bridge to complete with a timeout, passing the source chain
+                                if config_data["bridge"].get("wait_for_completion", True):
+                                    log().info("Waiting for bridge completion...")
+                                    
+                                    # Calculate remaining timeout
+                                    remaining_timeout = max(10, wallet_timeout - int(time.time() - wallet_start_time))
+                                    timeout_minutes = min(15, remaining_timeout // 60)
+                                    
+                                    bridge_service.wait_for_completion(
+                                        tx_hash=tx_hash_op_to_base,
+                                        timeout_minutes=timeout_minutes,
+                                        source_chain=from_chain_2  # Pass the source chain
+                                    )
+                            else:
+                                log().error(f"{from_chain_2} to {to_chain_2} bridge failed")
+                        else:
+                            log().error(f"{from_chain_1} to {to_chain_1} bridge completion failed or timed out")
+                    else:
+                        # Don't wait for completion, directly proceed to the return bridge
+                        delay_time = config_data['delay'].get('between_bridges', 30)
+                        log().info(f"Not waiting for confirmation, delaying {delay_time} seconds before return bridge...")
+                        time.sleep(delay_time)
+                        
+                        # Second bridge: Optimism Sepolia to Base Sepolia
+                        from_chain_2 = "optimism_sepolia"
+                        to_chain_2 = "base_sepolia"
+                            
+                        # Perform Optimism Sepolia to Base Sepolia bridge
+                        log().info(f"Bridging {amount} ETH from {from_chain_2} to {to_chain_2}")
+                        tx_hash_op_to_base = bridge_service.bridge(
+                            from_chain=from_chain_2,
+                            to_chain=to_chain_2,
+                            amount=amount
+                        )
+                            
+                        if tx_hash_op_to_base:
+                            log().success(f"{from_chain_2} to {to_chain_2} bridge successful: {tx_hash_op_to_base[:10]}...")
+                            
+                            # Wait for bridge to complete with a timeout, passing the source chain
+                            if config_data["bridge"].get("wait_for_completion", True):
+                                log().info("Waiting for bridge completion...")
+                                
+                                # Calculate remaining timeout
+                                remaining_timeout = max(10, wallet_timeout - int(time.time() - wallet_start_time))
+                                timeout_minutes = min(15, remaining_timeout // 60)
+                                
+                                bridge_service.wait_for_completion(
+                                    tx_hash=tx_hash_op_to_base,
+                                    timeout_minutes=timeout_minutes,
+                                    source_chain=from_chain_2  # Pass the source chain
+                                )
+                        else:
+                            log().error(f"{from_chain_2} to {to_chain_2} bridge failed")
+                else:
+                    log().error(f"{from_chain_1} to {to_chain_1} bridge transaction failed")
+                    # Add a delay before attempting next bridge
+                    delay_time = 60
+                    log().info(f"Waiting {delay_time} seconds before next attempt...")
+                    
+                    # Wait with timeout check
+                    for _ in range(delay_time):
+                        if shutdown_event.is_set():
+                            log().info("Shutdown requested, stopping wallet processing")
+                            return
+                        
+                        # Check wallet timeout
+                        if time.time() - wallet_start_time > wallet_timeout:
+                            log().warning(f"Wallet processing timeout reached during delay")
+                            return
+                            
+                        time.sleep(1)
             
     except Exception as e:
         log().error(f"Error processing wallet: {str(e)}")
@@ -203,11 +314,11 @@ def worker_thread():
         
         while not shutdown_event.is_set():
             try:
-                # Get a wallet from the queue with a timeout
+                # Get a wallet from the queue with a SHORT timeout (this is crucial for Ctrl+C responsiveness)
                 try:
-                    wallet_info = wallet_queue.get(timeout=1)
+                    wallet_info = wallet_queue.get(timeout=0.5)  # Short timeout - 0.5 seconds
                 except queue.Empty:
-                    # Queue is empty, check if we should exit
+                    # Queue is empty or timeout, check if we should exit
                     continue
                 
                 # Process the wallet
@@ -224,11 +335,12 @@ def worker_thread():
                 set_wallet_context("")
                 log().info(f"Waiting {delay_time} seconds before next wallet")
                 
-                # Wait with timeout check
-                for _ in range(delay_time):
+                # Wait with frequent checks for shutdown event (key for Ctrl+C responsiveness)
+                start_time = time.time()
+                while time.time() - start_time < delay_time:
                     if shutdown_event.is_set():
                         break
-                    time.sleep(1)
+                    time.sleep(min(0.5, delay_time))  # Sleep in small increments
                 
             except Exception as e:
                 # Reset wallet context for error logging
@@ -240,6 +352,9 @@ def worker_thread():
                     wallet_queue.task_done()
                 except:
                     pass
+                
+            # Add brief sleep to allow keyboard interrupt to be processed
+            time.sleep(0.1)
     finally:
         # Clean up thread-specific resources when thread exits
         SessionManager.close_sessions()
@@ -274,6 +389,9 @@ def main():
             thread_count = config_data.get("thread_count", 1)
             logger.info(f"Using {thread_count} threads for processing")
             
+            # Get the initial queue size to track completion
+            queued_wallets = len(private_keys)
+            
             # Fill the wallet queue
             for i, private_key in enumerate(private_keys):
                 # Get proxy for this wallet, both as dict and url
@@ -295,8 +413,22 @@ def main():
                 thread.start()
             
             try:
-                # Wait for all tasks to complete
-                wallet_queue.join()
+                # Wait for all tasks to complete or KeyboardInterrupt
+                # Use a polling approach instead of queue.join() with timeout
+                completed = False
+                while not completed and not shutdown_event.is_set():
+                    # Sleep briefly to avoid consuming CPU
+                    time.sleep(0.5)
+                    
+                    # Check if queue is empty AND all tasks have been marked as done
+                    # This is equivalent to what queue.join() does but allows us to check shutdown_event
+                    if wallet_queue.empty() and wallet_queue.unfinished_tasks == 0:
+                        completed = True
+                    
+                if shutdown_event.is_set():
+                    logger.info("Shutdown event detected, cleaning up...")
+                else:
+                    logger.info("All wallet processing completed.")
                 
                 # Signal threads to terminate
                 shutdown_event.set()
@@ -305,21 +437,45 @@ def main():
                 for thread in threads:
                     thread.join(timeout=5.0)
                     
+                if shutdown_event.is_set() and hasattr(shutdown_event, "_exit_requested"):
+                    # This is an explicit shutdown, not a normal completion
+                    logger.info("Exiting program due to shutdown request")
+                    break
+                    
                 # Delay before restarting
                 delay_hours = config_data['delay']['after_completion'] // 3600
                 logger.info(f"All wallets processed. Waiting {delay_hours} hours before restarting")
                 
-                # Simple countdown
+                # Simple countdown with better Ctrl+C responsiveness
                 total_seconds = config_data["delay"]["after_completion"]
-                for remaining in range(total_seconds, 0, -30):
+                start_time = time.time()
+                while time.time() - start_time < total_seconds:
+                    if shutdown_event.is_set():
+                        break
+                        
+                    remaining = total_seconds - int(time.time() - start_time)
+                    if remaining <= 0:
+                        break
+                        
                     hours = remaining // 3600
                     minutes = (remaining % 3600) // 60
                     seconds = remaining % 60
-                    logger.info(f"Next run in: {hours:02d}:{minutes:02d}:{seconds:02d}")
-                    time.sleep(min(30, remaining))
+                    
+                    # Only update log periodically to avoid spam
+                    if remaining % 30 == 0:
+                        logger.info(f"Next run in: {hours:02d}:{minutes:02d}:{seconds:02d}")
+                    
+                    # Sleep in small chunks to remain responsive to Ctrl+C
+                    time.sleep(0.5)
+                    
+                if shutdown_event.is_set():
+                    logger.info("Restart interrupted, exiting program")
+                    break
+                    
             except KeyboardInterrupt:
-                # Handle keyboard interrupt
+                # Handle keyboard interrupt explicitly
                 logger.info("Keyboard interrupt detected, shutting down...")
+                setattr(shutdown_event, "_exit_requested", True)
                 shutdown_event.set()
                 
                 # Wait for threads to terminate
@@ -329,10 +485,12 @@ def main():
                 break
     except Exception as e:
         logger.error(f"Error in main loop: {str(e)}")
+        logger.error(traceback.format_exc())
     finally:
         # Make sure to signal shutdown
         shutdown_event.set()
         logger.info("Application shutdown complete")
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
