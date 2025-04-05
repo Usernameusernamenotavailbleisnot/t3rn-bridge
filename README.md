@@ -1,32 +1,26 @@
 # T3RN Bridge Testnet Automation
 
-A Python automation tool for bridging ETH between Base Sepolia and Optimism Sepolia testnets using t3rn's bridge protocol.
+A Python automation tool for bridging ETH between multiple testnets using t3rn's bridge protocol.
 
 ## Overview
 
-This application automates the process of bridging ETH tokens between Base Sepolia and Optimism Sepolia testnets. It supports:
-
-- Multi-wallet processing from a list of private keys
-- Configurable bridging parameters (amounts, gas multipliers, etc.)
-- Robust transaction monitoring and status tracking
-- Multi-threaded operation for parallel wallet processing
-- Optional proxy support for network requests
-- Detailed logging and error handling
+This application automates the process of bridging ETH tokens between various testnets, including Base Sepolia, Optimism Sepolia, Arbitrum Sepolia, Blast Sepolia, and Unichain Sepolia. The tool supports creating custom bridging paths, allowing you to sequence multiple bridge operations across different networks.
 
 ## Features
 
-- **Bidirectional Bridging**: Automatically bridges ETH from Base Sepolia to Optimism Sepolia and back
-- **Multiple Wallet Support**: Process multiple wallets in sequence or parallel
-- **Automated Retries**: Built-in retry mechanism with exponential backoff
-- **Transaction Monitoring**: Tracks bridge transaction status through the entire process
-- **Thread Safety**: Designed for concurrent operation with thread-local resources
-- **Configurable Parameters**: Customize amounts, delays, gas settings via configuration
+- **Multi-Network Support**: Bridge between Base Sepolia, Optimism Sepolia, Arbitrum Sepolia, Blast Sepolia, and Unichain Sepolia
+- **Custom Bridge Flows**: Define your own bridging paths and sequences
+- **Optional Confirmation Waiting**: Choose whether to wait for bridge confirmations between operations
+- **Multi-Wallet Processing**: Process multiple wallets in sequence or parallel
+- **Robust Error Handling**: Specific handling for common bridge errors (like RO#7)
+- **Smart Retries**: Exponential backoff and targeted retry strategies
+- **Proxy Support**: Route requests through HTTP or SOCKS proxies
 
 ## Prerequisites
 
 - Python 3.8+
 - Virtual environment (venv)
-- Ethereum wallet(s) with testnet ETH on Base Sepolia
+- Ethereum wallet(s) with testnet ETH on at least one supported network
 - Internet connection
 
 ## Installation
@@ -37,7 +31,7 @@ This application automates the process of bridging ETH tokens between Base Sepol
    cd t3rn-bridge
    ```
 
-2. Create and activate a virtual environment (mandatory):
+2. Create and activate a virtual environment:
    ```
    # Create virtual environment
    python -m venv venv
@@ -54,8 +48,8 @@ This application automates the process of bridging ETH tokens between Base Sepol
    pip install -r requirements.txt
    ```
 
-4. Set up your configuration files:
-   - `config.json`: Bridge configuration parameters
+4. Set up configuration files:
+   - `config.json`: Bridge configuration (see Configuration section)
    - `pk.txt`: List of private keys (one per line)
    - `proxy.txt` (optional): List of proxies (one per line)
 
@@ -63,39 +57,84 @@ This application automates the process of bridging ETH tokens between Base Sepol
 
 ### config.json
 
+The `config.json` file has been expanded to support custom bridge flows and multiple networks:
+
 ```json
 {
-  "use_proxy": false,
-  "thread_count": 2,
+  "use_proxy": true,
+  "thread_count": 1,
   "retries": {
-    "max_attempts": 3,
+    "max_attempts": 5,
     "backoff_factor": 2,
     "initial_wait": 1
   },
   "bridge": {
-    "repeat_count": 2,
+    "repeat_count": 1,
     "amount": {
-      "min": 0.11,
-      "max": 0.15
+      "min": 3.1,
+      "max": 3.2
     },
-    "gas_multiplier": 1.1
+    "gas_multiplier": 1.1,
+    "wait_for_completion": false,
+    "custom_flow": true,
+    "bridge_paths": [
+      {
+        "from_chain": "base_sepolia",
+        "to_chain": "optimism_sepolia"
+      },
+      {
+        "from_chain": "optimism_sepolia",
+        "to_chain": "arbitrum_sepolia"
+      },
+      {
+        "from_chain": "arbitrum_sepolia",
+        "to_chain": "blast_sepolia"
+      },
+      {
+        "from_chain": "blast_sepolia",
+        "to_chain": "unichain_sepolia"
+      },
+      {
+        "from_chain": "unichain_sepolia",
+        "to_chain": "base_sepolia"
+      }
+    ]
   },
   "delay": {
     "between_wallets": 60,
+    "between_bridges": 30,
     "after_completion": 90000
   },
   "chains": {
     "base_sepolia": {
       "chain_id": 84532,
-      "rpc_url": "https://sepolia.base.org",
+      "rpc_url": "https://base-sepolia-rpc.publicnode.com",
       "bridge_contract": "0xCEE0372632a37Ba4d0499D1E2116eCff3A17d3C3",
       "api_name": "bast"
     },
     "optimism_sepolia": {
       "chain_id": 11155420,
-      "rpc_url": "https://sepolia.optimism.io",
+      "rpc_url": "https://optimism-sepolia-rpc.publicnode.com",
       "bridge_contract": "0xb6Def636914Ae60173d9007E732684a9eEDEF26E",
       "api_name": "opst"
+    },
+    "arbitrum_sepolia": {
+      "chain_id": 421614,
+      "rpc_url": "https://arbitrum-sepolia-rpc.publicnode.com",
+      "bridge_contract": "0x22B65d0B9b59af4D3Ed59F18b9Ad53f5F4908B54",
+      "api_name": "arbt"
+    },
+    "blast_sepolia": {
+      "chain_id": 168587773,
+      "rpc_url": "https://sepolia.blast.io",
+      "bridge_contract": "0x36B2415644d47b8f646697b6c4C5a9D55400f2Dd",
+      "api_name": "blst"
+    },
+    "unichain_sepolia": {
+      "chain_id": 4338,
+      "rpc_url": "https://unichain-sepolia-rpc.publicnode.com",
+      "bridge_contract": "0x1cEAb5967E5f078Fa0FEC3DFfD0394Af1fEeBCC9",
+      "api_name": "unit"
     }
   },
   "api": {
@@ -104,6 +143,13 @@ This application automates the process of bridging ETH tokens between Base Sepol
   }
 }
 ```
+
+### Key Configuration Options
+
+- **custom_flow**: Enable/disable custom bridge flow
+- **wait_for_completion**: Whether to wait for API confirmation between bridges
+- **bridge_paths**: List of bridge paths with source and destination chains
+- **between_bridges**: Delay between sequential bridges in seconds
 
 ### Private Keys (pk.txt)
 
@@ -127,19 +173,11 @@ Supported proxy formats:
 - http://IP:PORT
 - socks5://user:password@IP:PORT
 
-Example:
-```
-# Proxy 1
-192.168.1.1:8080
-# Proxy 2
-user:pass@192.168.1.2:8080
-```
-
 ## Usage
 
 Make sure your virtual environment is activated, then run the main application:
 
-```
+```bash
 # Ensure venv is activated
 # On Windows: venv\Scripts\activate
 # On macOS/Linux: source venv/bin/activate
@@ -147,43 +185,58 @@ Make sure your virtual environment is activated, then run the main application:
 python -m src.app
 ```
 
-The application will:
-1. Load your private keys from `pk.txt`
-2. Process each wallet in sequence (or in parallel based on thread count)
-3. Bridge ETH from Base Sepolia to Optimism Sepolia
-4. Wait for the bridge to complete
-5. Bridge ETH back from Optimism Sepolia to Base Sepolia
-6. Repeat based on configuration settings
+### Custom Bridge Flow Examples
+
+The tool supports several bridge flow configurations:
+
+#### Linear Chain Walk
+```json
+"bridge_paths": [
+  {"from_chain": "base_sepolia", "to_chain": "optimism_sepolia"},
+  {"from_chain": "optimism_sepolia", "to_chain": "arbitrum_sepolia"},
+  {"from_chain": "arbitrum_sepolia", "to_chain": "blast_sepolia"}
+]
+```
+
+#### Circular Flow
+```json
+"bridge_paths": [
+  {"from_chain": "base_sepolia", "to_chain": "blast_sepolia"},
+  {"from_chain": "blast_sepolia", "to_chain": "unichain_sepolia"},
+  {"from_chain": "unichain_sepolia", "to_chain": "base_sepolia"}
+]
+```
+
+#### Back-and-Forth
+```json
+"bridge_paths": [
+  {"from_chain": "base_sepolia", "to_chain": "optimism_sepolia"},
+  {"from_chain": "optimism_sepolia", "to_chain": "base_sepolia"},
+  {"from_chain": "base_sepolia", "to_chain": "optimism_sepolia"}
+]
+```
+
+## Error Handling
+
+The application has improved error handling, especially for common errors:
+
+- **RO#7 Error**: This error occurs when the bridge is temporarily unavailable. The script will retry up to 100 times.
+- **Network Timeouts**: Automatically retries with backoff
+- **Insufficient Balance**: Checks and warns before attempting bridges
+- **Keyboard Interrupts**: Handles Ctrl+C gracefully with proper cleanup
+
 
 ## Process Flow
 
 1. For each wallet:
    - Initialize bridge service with wallet's private key
-   - Bridge ETH from Base Sepolia to Optimism Sepolia
-   - Monitor bridge transaction status
-   - After completion, bridge ETH back from Optimism Sepolia to Base Sepolia
-   - Monitor return bridge transaction status
-   - Wait for specified delay before processing next wallet
+   - Process each bridge in the custom flow sequence (or default flow if custom_flow=false)
+   - Monitor bridge transaction status based on the wait_for_completion setting
+   - Apply delay between bridges and wallets as configured
 
 2. After all wallets are processed:
    - Wait for the configured delay
    - Restart the process if running in continuous mode
-
-## Logging
-
-Logs are stored in the `logs` directory with timestamps. The application provides detailed logging for each operation, including:
-- Transaction hashes
-- Bridge status updates
-- Error details with retry information
-- Wallet processing status
-
-## Error Handling
-
-The application includes robust error handling:
-- Automatic retries with exponential backoff
-- Transaction validation
-- Timeout protection
-- Error logging with stack traces
 
 ## License
 
