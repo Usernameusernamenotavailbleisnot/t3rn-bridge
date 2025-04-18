@@ -1,26 +1,62 @@
-# Core dependencies
-web3==6.11.1
-eth-account==0.9.0
-requests==2.31.0
-
-# Rich UI and logging
-rich==13.7.0
-loguru==0.7.2
-
-# Utilities
-python-dotenv==1.0.0
-pydantic==2.5.2
-
-# HTTP Proxies support
-PySocks==1.7.1
-
-# For async operations (if needed)
 aiohttp==3.9.1
+aiosignal==1.3.2
+annotated-types==0.7.0
+async-timeout==4.0.3
 asyncio==3.4.3
-
-# Testing
+attrs==25.3.0
+bitarray==3.3.1
+cached-property==2.0.1
+certifi==2025.1.31
+charset-normalizer==3.4.1
+colorama==0.4.6
+cytoolz==1.0.1
+eth-account==0.9.0
+eth-hash==0.7.1
+eth-keyfile==0.9.1
+eth-keys==0.6.1
+eth-rlp==1.0.1
+eth-typing==5.2.0
+eth-utils==5.2.0
+eth_abi==5.2.0
+exceptiongroup==1.2.2
+frozenlist==1.5.0
+hexbytes==0.3.1
+idna==3.10
+iniconfig==2.1.0
+jsonschema==4.23.0
+jsonschema-specifications==2024.10.1
+loguru==0.7.2
+lru-dict==1.3.0
+markdown-it-py==3.0.0
+mdurl==0.1.2
+multidict==6.3.2
+packaging==24.2
+parsimonious==0.10.0
+pluggy==1.5.0
+propcache==0.3.1
+protobuf==6.30.2
+py-ecc==7.0.1
+pycryptodome==3.22.0
+pydantic==2.5.2
+pydantic_core==2.14.5
+Pygments==2.19.1
+PySocks==1.7.1
 pytest==7.4.3
 pytest-asyncio==0.21.1
-
-# Typing
-typing-extensions==4.8.0
+python-dotenv==1.0.0
+pyunormalize==16.0.0
+pywin32==310
+referencing==0.36.2
+regex==2024.11.6
+requests==2.31.0
+rich==13.7.0
+rlp==4.1.0
+rpds-py==0.24.0
+tomli==2.2.1
+toolz==1.0.0
+typing_extensions==4.8.0
+urllib3==2.3.0
+web3==6.11.1
+websockets==15.0.1
+win32_setctime==1.2.0
+yarl==1.18.3
