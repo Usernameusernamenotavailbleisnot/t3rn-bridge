@@ -35,6 +35,30 @@
       {
         "from_chain": "unichain_sepolia",
         "to_chain": "base_sepolia"
+      },
+      {
+        "from_chain": "base_sepolia",
+        "to_chain": "monad_testnet"
+      },
+      {
+        "from_chain": "monad_testnet",
+        "to_chain": "base_sepolia"
+      },
+      {
+        "from_chain": "base_sepolia",
+        "to_chain": "sei_testnet"
+      },
+      {
+        "from_chain": "sei_testnet",
+        "to_chain": "base_sepolia"
+      },
+      {
+        "from_chain": "monad_testnet",
+        "to_chain": "sei_testnet"
+      },
+      {
+        "from_chain": "sei_testnet",
+        "to_chain": "monad_testnet"
       }
     ]
   },
@@ -73,6 +97,18 @@
       "rpc_url": "https://unichain-sepolia-rpc.publicnode.com",
       "bridge_contract": "0x1cEAb5967E5f078Fa0FEC3DFfD0394Af1fEeBCC9",
       "api_name": "unit"
+    },
+    "monad_testnet": {
+      "chain_id": 10143,
+      "rpc_url": "https://testnet-rpc.monad.xyz",
+      "bridge_contract": "0x443119e61f571BC0c9715190F3aBE6c91f4cA630",
+      "api_name": "mont"
+    },
+    "sei_testnet": {
+      "chain_id": 1328,
+      "rpc_url": "https://evm-rpc-testnet.sei-apis.com",
+      "bridge_contract": "0x9a51bdCe902c4701F8C9AEF670cefE6F6Fa0d453",
+      "api_name": "seit"
     }
   },
   "api": {
