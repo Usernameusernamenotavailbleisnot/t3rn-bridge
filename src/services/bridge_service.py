@@ -42,6 +42,16 @@ class BridgeService:
         """Get wallet address."""
         return self.wallet_address
     
+    def get_native_asset_for_chain(self, chain_name):
+        """Get the native asset symbol for a given chain."""
+        # Map chain names to their native asset symbols
+        chain_to_asset = {
+            "monad_testnet": "mon",
+            "sei_testnet": "sei"
+        }
+        # Default to eth for chains not in the mapping
+        return chain_to_asset.get(chain_name, "eth")
+    
     @retry_with_backoff
     def get_price(self, chain, token, amount_wei):
         """Get price in USD for the given amount of token on the specified chain."""
@@ -79,9 +89,13 @@ class BridgeService:
         from_chain_config = self.config["chains"][from_chain]
         to_chain_config = self.config["chains"][to_chain]
         
+        # Determine the correct asset types for source and destination chains
+        from_asset = self.get_native_asset_for_chain(from_chain)
+        to_asset = self.get_native_asset_for_chain(to_chain)
+        
         payload = {
-            "fromAsset": "eth",
-            "toAsset": "eth",
+            "fromAsset": from_asset,
+            "toAsset": to_asset,
             "fromChain": from_chain_config["api_name"],
             "toChain": to_chain_config["api_name"],
             "amountWei": amount_wei,
@@ -124,7 +138,11 @@ class BridgeService:
         # Make sure amount has limited decimal places (max 5)
         amount = round(amount, 5)
         
-        log().info(f"Preparing to bridge {amount} ETH from {from_chain} to {to_chain}")
+        # Get native asset types for logging
+        from_asset = self.get_native_asset_for_chain(from_chain)
+        to_asset = self.get_native_asset_for_chain(to_chain)
+        
+        log().info(f"Preparing to bridge {amount} {from_asset.upper()} from {from_chain} to {to_chain} ({to_asset.upper()})")
         
         # Convert amount to Wei
         amount_wei = Web3.to_wei(amount, 'ether')
@@ -134,9 +152,9 @@ class BridgeService:
         from_chain_config = self.config["chains"][from_chain]
         to_chain_config = self.config["chains"][to_chain]
         
-        # Get price in USD
-        usd_price = self.get_price(from_chain_config["api_name"], "eth", amount_wei_str)
-        log().info(f"Current ETH value: ${usd_price:.2f}")
+        # Get price in USD using the correct asset type
+        usd_price = self.get_price(from_chain_config["api_name"], from_asset, amount_wei_str)
+        log().info(f"Current {from_asset.upper()} value: ${usd_price:.2f}")
         
         # Get bridge estimate
         estimate = self.estimate_bridge(from_chain, to_chain, amount_wei_str)
