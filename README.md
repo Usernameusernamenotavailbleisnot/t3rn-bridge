@@ -18,7 +18,7 @@ This application automates the process of bridging ETH tokens between various te
 
 ## Prerequisites
 
-- Python 3.8+
+- Python 3.10.11+
 - Virtual environment (venv)
 - Ethereum wallet(s) with testnet ETH on at least one supported network
 - Internet connection
