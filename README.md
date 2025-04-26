@@ -1,14 +1,15 @@
 # T3RN Bridge Testnet Automation
 
-A Python automation tool for bridging ETH between multiple testnets using t3rn's bridge protocol.
+A Python automation tool for bridging native tokens (ETH/MON/SEI) between multiple testnets using t3rn's bridge protocol.
 
 ## Overview
 
-This application automates the process of bridging ETH tokens between various testnets, including Base Sepolia, Optimism Sepolia, Arbitrum Sepolia, Blast Sepolia, and Unichain Sepolia. The tool supports creating custom bridging paths, allowing you to sequence multiple bridge operations across different networks.
+This application automates the process of bridging native tokens between various testnets, including Base Sepolia, Optimism Sepolia, Arbitrum Sepolia, Blast Sepolia, Unichain Sepolia, Monad Testnet, and Sei Testnet. The tool supports creating custom bridging paths, allowing you to sequence multiple bridge operations across different networks.
 
 ## Features
 
-- **Multi-Network Support**: Bridge between Base Sepolia, Optimism Sepolia, Arbitrum Sepolia, Blast Sepolia, and Unichain Sepolia
+- **Multi-Network Support**: Bridge between Base Sepolia, Optimism Sepolia, Arbitrum Sepolia, Blast Sepolia, Unichain Sepolia, Monad Testnet, and Sei Testnet
+- **Native Token Support**: Automatically handles native tokens on each chain (ETH, MON, SEI)
 - **Custom Bridge Flows**: Define your own bridging paths and sequences
 - **Optional Confirmation Waiting**: Choose whether to wait for bridge confirmations between operations
 - **Multi-Wallet Processing**: Process multiple wallets in sequence or parallel
@@ -20,7 +21,7 @@ This application automates the process of bridging ETH tokens between various te
 
 - Python 3.10.11+
 - Virtual environment (venv)
-- Ethereum wallet(s) with testnet ETH on at least one supported network
+- Ethereum wallet(s) with testnet tokens on at least one supported network
 - Internet connection
 
 ## Installation
@@ -57,7 +58,7 @@ This application automates the process of bridging ETH tokens between various te
 
 ### config.json
 
-The `config.json` file has been expanded to support custom bridge flows and multiple networks:
+The `config.json` file supports a wide range of networks and custom bridge flows:
 
 ```json
 {
@@ -71,8 +72,8 @@ The `config.json` file has been expanded to support custom bridge flows and mult
   "bridge": {
     "repeat_count": 1,
     "amount": {
-      "min": 3.1,
-      "max": 3.2
+      "min": 0.005,
+      "max": 0.01
     },
     "gas_multiplier": 1.1,
     "wait_for_completion": false,
@@ -80,22 +81,14 @@ The `config.json` file has been expanded to support custom bridge flows and mult
     "bridge_paths": [
       {
         "from_chain": "base_sepolia",
-        "to_chain": "optimism_sepolia"
+        "to_chain": "monad_testnet"
       },
       {
-        "from_chain": "optimism_sepolia",
-        "to_chain": "arbitrum_sepolia"
+        "from_chain": "monad_testnet",
+        "to_chain": "sei_testnet"
       },
       {
-        "from_chain": "arbitrum_sepolia",
-        "to_chain": "blast_sepolia"
-      },
-      {
-        "from_chain": "blast_sepolia",
-        "to_chain": "unichain_sepolia"
-      },
-      {
-        "from_chain": "unichain_sepolia",
+        "from_chain": "sei_testnet",
         "to_chain": "base_sepolia"
       }
     ]
@@ -103,7 +96,7 @@ The `config.json` file has been expanded to support custom bridge flows and mult
   "delay": {
     "between_wallets": 60,
     "between_bridges": 30,
-    "after_completion": 90000
+    "after_completion": 3600
   },
   "chains": {
     "base_sepolia": {
@@ -131,10 +124,22 @@ The `config.json` file has been expanded to support custom bridge flows and mult
       "api_name": "blst"
     },
     "unichain_sepolia": {
-      "chain_id": 4338,
+      "chain_id": 1301,
       "rpc_url": "https://unichain-sepolia-rpc.publicnode.com",
       "bridge_contract": "0x1cEAb5967E5f078Fa0FEC3DFfD0394Af1fEeBCC9",
       "api_name": "unit"
+    },
+    "monad_testnet": {
+      "chain_id": 10143,
+      "rpc_url": "https://testnet-rpc.monad.xyz",
+      "bridge_contract": "0x443119e61f571BC0c9715190F3aBE6c91f4cA630",
+      "api_name": "mont"
+    },
+    "sei_testnet": {
+      "chain_id": 1328,
+      "rpc_url": "https://evm-rpc-testnet.sei-apis.com",
+      "bridge_contract": "0x9a51bdCe902c4701F8C9AEF670cefE6F6Fa0d453",
+      "api_name": "seit"
     }
   },
   "api": {
@@ -150,6 +155,7 @@ The `config.json` file has been expanded to support custom bridge flows and mult
 - **wait_for_completion**: Whether to wait for API confirmation between bridges
 - **bridge_paths**: List of bridge paths with source and destination chains
 - **between_bridges**: Delay between sequential bridges in seconds
+- **amount**: Configure the min/max amount to bridge (adjust based on the native token's value)
 
 ### Private Keys (pk.txt)
 
@@ -189,32 +195,50 @@ python -m src.app
 
 The tool supports several bridge flow configurations:
 
-#### Linear Chain Walk
+#### Multi-Network Circle
 ```json
 "bridge_paths": [
-  {"from_chain": "base_sepolia", "to_chain": "optimism_sepolia"},
-  {"from_chain": "optimism_sepolia", "to_chain": "arbitrum_sepolia"},
-  {"from_chain": "arbitrum_sepolia", "to_chain": "blast_sepolia"}
+  {"from_chain": "base_sepolia", "to_chain": "monad_testnet"},
+  {"from_chain": "monad_testnet", "to_chain": "sei_testnet"},
+  {"from_chain": "sei_testnet", "to_chain": "base_sepolia"}
 ]
 ```
 
-#### Circular Flow
+#### Exchange Eth/MON/SEI
 ```json
 "bridge_paths": [
-  {"from_chain": "base_sepolia", "to_chain": "blast_sepolia"},
-  {"from_chain": "blast_sepolia", "to_chain": "unichain_sepolia"},
-  {"from_chain": "unichain_sepolia", "to_chain": "base_sepolia"}
+  {"from_chain": "base_sepolia", "to_chain": "monad_testnet"},
+  {"from_chain": "monad_testnet", "to_chain": "base_sepolia"},
+  {"from_chain": "base_sepolia", "to_chain": "sei_testnet"},
+  {"from_chain": "sei_testnet", "to_chain": "base_sepolia"}
 ]
 ```
 
-#### Back-and-Forth
+#### Direct MON/SEI Exchange
 ```json
 "bridge_paths": [
-  {"from_chain": "base_sepolia", "to_chain": "optimism_sepolia"},
-  {"from_chain": "optimism_sepolia", "to_chain": "base_sepolia"},
-  {"from_chain": "base_sepolia", "to_chain": "optimism_sepolia"}
+  {"from_chain": "monad_testnet", "to_chain": "sei_testnet"},
+  {"from_chain": "sei_testnet", "to_chain": "monad_testnet"}
 ]
 ```
+
+## Native Token Handling
+
+The tool automatically detects and handles the native token for each chain:
+- Ethereum-based chains (Base, Optimism, Arbitrum, Blast, Unichain): ETH
+- Monad Testnet: MON
+- Sei Testnet: SEI
+
+When bridging between chains, the application will:
+1. Use the correct token type in the API calls
+2. Display the appropriate token symbol in logs
+3. Handle different token values correctly
+
+### Token Value Considerations
+
+Based on observed conversion rates:
+- When bridging MON, use smaller amounts (0.04 MON ≈ 0.007 ETH)
+- When bridging SEI, use smaller amounts (0.02 SEI ≈ 0.003 ETH)
 
 ## Error Handling
 
@@ -224,7 +248,6 @@ The application has improved error handling, especially for common errors:
 - **Network Timeouts**: Automatically retries with backoff
 - **Insufficient Balance**: Checks and warns before attempting bridges
 - **Keyboard Interrupts**: Handles Ctrl+C gracefully with proper cleanup
-
 
 ## Process Flow
 
