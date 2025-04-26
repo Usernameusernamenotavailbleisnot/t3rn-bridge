@@ -80,6 +80,34 @@ DEFAULT_TIMEOUT = 30
 # Gas limits
 DEFAULT_GAS_LIMIT = 135000
 
+# Token asset codes
+ASSET_CODES = {
+    "eth": 0,
+    "t3eth": 1,
+    "bnb": 2,
+    "sol": 3,
+    "btc": 4,
+    "dot": 100,
+    "usdc": 101,
+    "usdt": 102,
+    "dai": 103,
+    "t3usd": 104,
+    "fil": 199,
+    "mon": 200,
+    "t3mon": 201,
+    "sei": 500,
+    "t3sei": 501,
+    "trn": 3333,
+    "brn": 3343,
+    "lorn": 3330,
+    "tia": 4948,
+    "t3tia": 4949,
+    "t3dot": 1000,
+    "t3sol": 2000,
+    "t3btc": 5000,
+    "ukn": -1
+}
+
 # Banner text
 BANNER_TEXT = """
 ████████╗██████╗ ██████╗ ███╗   ██╗
