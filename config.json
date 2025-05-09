@@ -109,6 +109,12 @@
       "rpc_url": "https://evm-rpc-testnet.sei-apis.com",
       "bridge_contract": "0x9a51bdCe902c4701F8C9AEF670cefE6F6Fa0d453",
       "api_name": "seit"
+    },
+    "bnb_tesnet": {
+      "chain_id": 97,
+      "rpc_url": "https://bsc-testnet-rpc.publicnode.com",
+      "bridge_contract": "0x7fA0186d0394b4685931D1Aa549cA79c49004353",
+      "api_name": "bsct"
     }
   },
   "api": {
