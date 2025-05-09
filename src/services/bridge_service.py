@@ -47,7 +47,8 @@ class BridgeService:
         # Map chain names to their native asset symbols
         chain_to_asset = {
             "monad_testnet": "mon",
-            "sei_testnet": "sei"
+            "sei_testnet": "sei",
+            "bnb_tesnet": "bnb"
         }
         # Default to eth for chains not in the mapping
         return chain_to_asset.get(chain_name, "eth")
